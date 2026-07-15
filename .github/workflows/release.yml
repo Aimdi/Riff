@@ -3,6 +3,12 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (e.g. v0.1.0); created if it doesn't exist"
+        required: true
+        default: "v0.1.0"
 
 permissions:
   contents: write
@@ -25,7 +31,11 @@ jobs:
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/* \
-            --title "Riff $GITHUB_REF_NAME" \
+          # On workflow_dispatch the tag doesn't exist yet; --target makes
+          # gh create it from the commit this workflow ran on.
+          gh release create "$TAG" dist/* \
+            --target "$GITHUB_SHA" \
+            --title "Riff $TAG" \
             --notes-file .github/release-notes.md
