@@ -1,0 +1,335 @@
+"""Main application window: sidebar navigation, content stack, player bar."""
+
+from __future__ import annotations
+
+from gi.repository import Adw, Gio, Gtk
+
+from .. import APP_NAME, config
+from ..core.models import Track
+from ..util import run_async
+from .pages import (
+    AlbumPage,
+    ArtistPage,
+    HomePage,
+    LibraryPage,
+    LocalPlaylistPage,
+    PlaylistPage,
+    PlaylistsPage,
+    SearchPage,
+)
+from .player_bar import PlayerBar
+from .queue_panel import QueuePanel
+
+CSS = b"""
+.riff-cover {
+    border-radius: 8px;
+    background-color: alpha(currentColor, 0.08);
+}
+.riff-cover picture, .riff-cover image {
+    border-radius: 8px;
+}
+.riff-cover-circular, .riff-cover-circular picture, .riff-cover-circular image {
+    border-radius: 9999px;
+}
+.riff-player-bar {
+    background-color: @headerbar_bg_color;
+    border-top: 1px solid @borders;
+}
+.riff-card {
+    padding: 8px;
+    border-radius: 12px;
+}
+"""
+
+SIDEBAR_ITEMS = [
+    ("home", "Home", "user-home-symbolic"),
+    ("search", "Search", "system-search-symbolic"),
+    ("favorites", "Favorites", "emblem-favorite-symbolic"),
+    ("history", "History", "document-open-recent-symbolic"),
+    ("playlists", "Playlists", "view-list-symbolic"),
+    ("downloads", "Downloads", "folder-download-symbolic"),
+]
+
+
+class MainWindow(Adw.ApplicationWindow):
+    def __init__(self, app, service, api, library, downloader):
+        super().__init__(application=app)
+        self.service = service
+        self.api = api
+        self.library = library
+        self.downloader = downloader
+
+        self.set_title(APP_NAME)
+        self.set_default_size(
+            int(config.settings.get("window_width", 1100)),
+            int(config.settings.get("window_height", 720)),
+        )
+        self._load_css()
+
+        # pages -----------------------------------------------------------
+        self.pages = {
+            "home": HomePage(self),
+            "search": SearchPage(self),
+            "favorites": LibraryPage(self, "favorites"),
+            "history": LibraryPage(self, "history"),
+            "playlists": PlaylistsPage(self),
+            "downloads": LibraryPage(self, "downloads"),
+        }
+        self.stack = Gtk.Stack()
+        self.stack.set_vexpand(True)
+        for name, page in self.pages.items():
+            self.stack.add_named(page, name)
+
+        # navigation view wraps the stack so detail pages can be pushed ----
+        self.nav = Adw.NavigationView()
+        root_page = Adw.NavigationPage.new(self.stack, APP_NAME)
+        root_page.set_tag("root")
+        self.nav.add(root_page)
+
+        # header bar --------------------------------------------------------
+        header = Adw.HeaderBar()
+        title = Adw.WindowTitle.new(APP_NAME, "")
+        header.set_title_widget(title)
+        menu = Gio.Menu()
+        menu.append("Lyrics", "win.lyrics")
+        menu.append("About Riff", "win.about")
+        menu_btn = Gtk.MenuButton()
+        menu_btn.set_icon_name("open-menu-symbolic")
+        menu_btn.set_menu_model(menu)
+        header.pack_end(menu_btn)
+
+        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        content_box.append(header)
+        content_box.append(self.nav)
+
+        # sidebar -----------------------------------------------------------
+        self.sidebar_list = Gtk.ListBox()
+        self.sidebar_list.add_css_class("navigation-sidebar")
+        self.sidebar_list.connect("row-activated", self._on_sidebar)
+        for name, label, icon in SIDEBAR_ITEMS:
+            row = Gtk.ListBoxRow()
+            row.item_name = name
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            box.set_margin_top(8)
+            box.set_margin_bottom(8)
+            box.set_margin_start(8)
+            box.append(Gtk.Image.new_from_icon_name(icon))
+            box.append(Gtk.Label(label=label))
+            row.set_child(box)
+            self.sidebar_list.append(row)
+
+        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        app_title = Gtk.Label(label="♫ Riff")
+        app_title.add_css_class("title-2")
+        app_title.set_margin_top(16)
+        app_title.set_margin_bottom(10)
+        sidebar_box.append(app_title)
+        sidebar_box.append(self.sidebar_list)
+
+        split = Adw.OverlaySplitView()
+        split.set_sidebar(sidebar_box)
+        split.set_content(content_box)
+        split.set_min_sidebar_width(200)
+        split.set_max_sidebar_width(220)
+
+        # queue flap on the right --------------------------------------------
+        self.queue_panel = QueuePanel(self)
+        self.queue_split = Adw.OverlaySplitView()
+        self.queue_split.set_sidebar_position(Gtk.PackType.END)
+        self.queue_split.set_sidebar(self.queue_panel)
+        self.queue_split.set_content(split)
+        self.queue_split.set_show_sidebar(False)
+        self.queue_split.set_min_sidebar_width(300)
+        self.queue_split.set_max_sidebar_width(340)
+
+        # player bar + toasts ---------------------------------------------------
+        self.player_bar = PlayerBar(self)
+        self.player_bar.queue_btn.connect("toggled", self._on_queue_toggle)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.append(self.queue_split)
+        outer.append(self.player_bar)
+
+        self.toaster = Adw.ToastOverlay()
+        self.toaster.set_child(outer)
+        self.set_content(self.toaster)
+
+        self.service.error_listeners.append(self.toast)
+        self._install_actions()
+        self.connect("close-request", self._on_close)
+
+        # select Home
+        self.sidebar_list.select_row(self.sidebar_list.get_row_at_index(0))
+        self.pages["home"].refresh()
+
+    # -- css / actions --------------------------------------------------------
+
+    def _load_css(self) -> None:
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_display(
+            self.get_display(), provider,
+            Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def _install_actions(self) -> None:
+        actions = {
+            "lyrics": self.show_lyrics,
+            "about": self.show_about,
+        }
+        for name, cb in actions.items():
+            action = Gio.SimpleAction.new(name, None)
+            action.connect("activate", lambda _a, _p, cb=cb: cb())
+            self.add_action(action)
+
+    # -- navigation ------------------------------------------------------------
+
+    def _on_sidebar(self, _lb, row) -> None:
+        name = getattr(row, "item_name", "home")
+        self.nav.pop_to_tag("root")
+        self.stack.set_visible_child_name(name)
+        page = self.pages[name]
+        if name == "search":
+            page.focus()
+        elif hasattr(page, "refresh"):
+            page.refresh()
+
+    def _push(self, widget, title: str) -> None:
+        page = Adw.NavigationPage.new(widget, title or APP_NAME)
+        self.nav.push(page)
+
+    def open_album(self, browse_id: str) -> None:
+        if browse_id:
+            self._push(AlbumPage(self, browse_id), "Album")
+
+    def open_artist(self, channel_id: str) -> None:
+        if channel_id:
+            self._push(ArtistPage(self, channel_id), "Artist")
+
+    def open_playlist(self, playlist_id: str) -> None:
+        if playlist_id:
+            self._push(PlaylistPage(self, playlist_id), "Playlist")
+
+    def open_local_playlist(self, playlist_id: int, name: str) -> None:
+        self._push(LocalPlaylistPage(self, playlist_id, name), name)
+
+    def _on_queue_toggle(self, btn) -> None:
+        self.queue_split.set_show_sidebar(btn.get_active())
+
+    # -- helpers used by widgets ------------------------------------------------
+
+    def toast(self, message: str) -> None:
+        self.toaster.add_toast(Adw.Toast.new(str(message)))
+
+    def prompt_text(self, title: str, placeholder: str, on_accept) -> None:
+        dialog = Adw.AlertDialog.new(title, None)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text(placeholder)
+        entry.set_margin_top(6)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", "Create")
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("ok")
+
+        def on_response(_d, response: str) -> None:
+            text = entry.get_text().strip()
+            if response == "ok" and text:
+                on_accept(text)
+
+        dialog.connect("response", on_response)
+        entry.connect("activate", lambda *_:
+                      (dialog.close(), on_response(dialog, "ok")))
+        dialog.present(self)
+
+    def choose_playlist_for(self, track: Track) -> None:
+        playlists = self.library.playlists()
+        dialog = Adw.AlertDialog.new("Add to Playlist", track.title)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("boxed-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        for pid, name, count in playlists:
+            row = Adw.ActionRow()
+            row.set_title(name)
+            row.set_subtitle(f"{count} songs")
+            row.set_activatable(True)
+            row.connect("activated", lambda _r, pid=pid: (
+                self.library.add_to_playlist(pid, track),
+                self.toast("Added to playlist"),
+                dialog.close()))
+            listbox.append(row)
+        if playlists:
+            box.append(listbox)
+        new_btn = Gtk.Button(label="New Playlist…")
+        new_btn.add_css_class("flat")
+        new_btn.connect("clicked", lambda *_: (
+            dialog.close(),
+            self.prompt_text("New Playlist", "Name", lambda name: (
+                self.library.add_to_playlist(
+                    self.library.create_playlist(name), track),
+                self.toast(f"Added to “{name}”")))))
+        box.append(new_btn)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.present(self)
+
+    def download_track(self, track: Track) -> None:
+        self.toast(f"Downloading “{track.title}”…")
+
+        def done(path: str) -> None:
+            self.toast(f"Downloaded “{track.title}”")
+
+        def error(exc: Exception) -> None:
+            self.toast(f"Download failed: {exc}")
+
+        run_async(lambda: self.downloader.download(track), done, error,
+                  name="riff-download")
+
+    def show_lyrics(self) -> None:
+        track = self.service.current_track
+        if track is None:
+            self.toast("Nothing is playing")
+            return
+
+        def present(lyrics: str) -> None:
+            dialog = Adw.Dialog.new()
+            dialog.set_title(f"Lyrics — {track.title}")
+            dialog.set_content_width(460)
+            dialog.set_content_height(600)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            box.append(Adw.HeaderBar())
+            label = Gtk.Label(label=lyrics or "No lyrics found for this song.")
+            label.set_wrap(True)
+            label.set_margin_top(12)
+            label.set_margin_bottom(24)
+            label.set_margin_start(24)
+            label.set_margin_end(24)
+            label.set_selectable(True)
+            sw = Gtk.ScrolledWindow()
+            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+            sw.set_vexpand(True)
+            sw.set_child(label)
+            box.append(sw)
+            dialog.set_child(box)
+            dialog.present(self)
+
+        run_async(lambda: self.api.lyrics(track.video_id), present,
+                  lambda _e: self.toast("Couldn't fetch lyrics"))
+
+    def show_about(self) -> None:
+        from .. import __version__
+
+        about = Adw.AboutDialog.new()
+        about.set_application_name(APP_NAME)
+        about.set_application_icon("io.github.aimdi.Riff")
+        about.set_version(__version__)
+        about.set_comments("A native YouTube Music player for Linux")
+        about.set_website("https://github.com/aimdi/player")
+        about.set_license_type(Gtk.License.GPL_3_0)
+        about.present(self)
+
+    def _on_close(self, _win) -> bool:
+        w, h = self.get_default_size()
+        config.settings.set("window_width", w)
+        config.settings.set("window_height", h)
+        return False

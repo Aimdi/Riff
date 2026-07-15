@@ -1,0 +1,55 @@
+# Maintainer: Riff contributors
+# PKGBUILD for Arch Linux / CachyOS
+#
+# Build & install from a local checkout:
+#   cd packaging && makepkg -si
+#
+# `python-ytmusicapi` lives in the AUR — on CachyOS install it first with
+# the preinstalled AUR helper:   paru -S python-ytmusicapi
+
+pkgname=riff-player
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Native YouTube Music player (GTK4 + libadwaita + mpv)"
+arch=('any')
+url="https://github.com/aimdi/player"
+license=('GPL-3.0-or-later')
+depends=(
+  'python'
+  'python-gobject'
+  'gtk4'
+  'libadwaita'
+  'mpv'
+  'yt-dlp'
+  'python-ytmusicapi'
+  'hicolor-icon-theme'
+)
+makedepends=(
+  'python-build'
+  'python-installer'
+  'python-wheel'
+  'python-setuptools'
+)
+
+# Build from the repository working tree (two directories up).
+_srcdir="$(cd .. && pwd)"
+
+pkgver() {
+  grep -oP '(?<=^__version__ = ")[^"]+' "$_srcdir/riff/__init__.py"
+}
+
+build() {
+  cd "$_srcdir"
+  python -m build --wheel --no-isolation --outdir "$srcdir/dist"
+}
+
+package() {
+  python -m installer --destdir="$pkgdir" "$srcdir"/dist/*.whl
+
+  install -Dm644 "$_srcdir/data/io.github.aimdi.Riff.desktop" \
+    "$pkgdir/usr/share/applications/io.github.aimdi.Riff.desktop"
+  install -Dm644 "$_srcdir/data/io.github.aimdi.Riff.svg" \
+    "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.aimdi.Riff.svg"
+  install -Dm644 "$_srcdir/LICENSE" \
+    "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

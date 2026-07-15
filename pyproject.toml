@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "riff-player"
+version = "0.1.0"
+description = "Native YouTube Music player for Linux (GTK4 + libadwaita + mpv)"
+readme = "README.md"
+license = { text = "GPL-3.0-or-later" }
+requires-python = ">=3.11"
+authors = [{ name = "Riff contributors" }]
+dependencies = [
+    "ytmusicapi>=1.5",
+    "yt-dlp>=2024.4.9",
+    "PyGObject>=3.46; platform_system=='Linux'",
+]
+keywords = ["music", "player", "youtube-music", "gtk4", "mpv"]
+classifiers = [
+    "Environment :: X11 Applications :: GTK",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+]
+
+[project.urls]
+Homepage = "https://github.com/aimdi/player"
+
+[project.scripts]
+riff = "riff.app:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["riff*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

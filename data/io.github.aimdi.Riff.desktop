@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Riff
+GenericName=Music Player
+Comment=Stream music from YouTube Music — no ads, no account
+Exec=riff
+Icon=io.github.aimdi.Riff
+Terminal=false
+Type=Application
+Categories=AudioVideo;Audio;Player;Music;GTK;
+Keywords=music;youtube;player;stream;song;
+StartupNotify=true
