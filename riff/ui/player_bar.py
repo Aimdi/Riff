@@ -92,6 +92,9 @@ class PlayerBar(Gtk.Box):
         now = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         now.set_vexpand(False)
         now.set_valign(Gtk.Align.CENTER)
+        # Cover + video toggle stacked: click art for album, film for video.
+        art_box = Gtk.Overlay()
+        art_box.set_size_request(52, 52)
         self.art = CoverArt(52)
         self.art_btn = Gtk.Button()
         self.art_btn.add_css_class("flat")
@@ -102,7 +105,24 @@ class PlayerBar(Gtk.Box):
         self.art_btn.set_child(self.art)
         self.art_btn.set_tooltip_text("Go to album")
         self.art_btn.connect("clicked", self._on_title_clicked)
-        now.append(self.art_btn)
+        art_box.set_child(self.art_btn)
+
+        self.video_btn = Gtk.ToggleButton()
+        self.video_btn.add_css_class("circular")
+        self.video_btn.add_css_class("riff-video-toggle")
+        self.video_btn.set_halign(Gtk.Align.END)
+        self.video_btn.set_valign(Gtk.Align.END)
+        self.video_btn.set_margin_end(2)
+        self.video_btn.set_margin_bottom(2)
+        self.video_btn.set_tooltip_text(
+            "Watch video in Riff (for YouTube videos)")
+        vid_icon = Gtk.Label(label="▶")
+        vid_icon.add_css_class("caption")
+        self.video_btn.set_child(vid_icon)
+        self.video_btn.set_sensitive(False)
+        self.video_btn.connect("toggled", self._on_video_toggled)
+        art_box.add_overlay(self.video_btn)
+        now.append(art_box)
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         text.set_valign(Gtk.Align.CENTER)
@@ -213,12 +233,15 @@ class PlayerBar(Gtk.Box):
             self.dur_label.set_label("0:00")
             self.fav_button.set_sensitive(False)
             self.track_menu_btn.set_sensitive(False)
+            self.video_btn.set_sensitive(False)
             self._set_link_active(self.title_btn, False)
             self._set_link_active(self.artist_btn, False)
             self._set_link_active(self.art_btn, False)
             return
         self.fav_button.set_sensitive(True)
         self.track_menu_btn.set_sensitive(True)
+        # Any YT id can try video mode (music-only tracks fall back to audio).
+        self.video_btn.set_sensitive(bool(track.video_id))
         menu, group = build_track_menu(self.window, track,
                                        on_favorite=self._on_favorite)
         self.track_menu_btn.set_menu_model(menu)
@@ -269,6 +292,22 @@ class PlayerBar(Gtk.Box):
             self.window.open_album(track.album_id)
         else:
             self.window.toast("Album page not available for this track")
+
+    def _on_video_toggled(self, btn: Gtk.ToggleButton) -> None:
+        if self._current is None or not self._current.video_id:
+            btn.set_active(False)
+            return
+        # Avoid feedback loop when service updates the toggle.
+        if getattr(self, "_video_sync", False):
+            return
+        self.window.set_video_mode(btn.get_active())
+
+    def set_video_active(self, active: bool) -> None:
+        self._video_sync = True
+        try:
+            self.video_btn.set_active(bool(active))
+        finally:
+            self._video_sync = False
 
     def _on_artist_clicked(self, _btn=None) -> None:
         track = self._current

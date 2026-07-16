@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from .. import config
-from ..util import run_async
+from ..util import _dispatch, run_async
 from . import scrobble
 from .api import MusicApi
 from .library import Library
@@ -23,6 +23,7 @@ from .player import (
 )
 from .queue import PlayQueue
 from .stream import StreamResolver
+from .video_gst import GstVideoPlayer, gst_video_available
 
 log = logging.getLogger("riff.service")
 
@@ -50,14 +51,21 @@ class PlaybackService:
         self.duration_listeners: list = []   # fn(dur: float)
         self.queue_listeners: list = []      # fn()
         self.error_listeners: list = []      # fn(message: str)
+        self.video_listeners: list = []      # fn(enabled: bool)
+        self.video_paintable_listeners: list = []  # fn(paintable|None)
 
         self._play_token = 0  # invalidates in-flight resolutions
         self._radio_pending = False
         self._scrobbled_current = False
+        self.video_mode = False
+        self._video: GstVideoPlayer | None = None
+        self._using_gst_video = False
+        self._video_state = STATE_STOPPED
+        self._video_pos_id = None
 
         self.queue.on_changed = self._emit_queue_changed
         engine.on_state = self._on_engine_state
-        engine.on_position = lambda p: self._emit(self.position_listeners, p)
+        engine.on_position = self._on_engine_position
         engine.on_duration = lambda d: self._emit(self.duration_listeners, d)
         engine.on_track_ended = self._on_track_ended
         engine.on_error = self._on_engine_error
@@ -72,6 +80,8 @@ class PlaybackService:
 
     @property
     def state(self) -> str:
+        if self._using_gst_video:
+            return self._video_state
         return self.engine.state
 
     def play_tracks(self, tracks: list[Track], start: int = 0) -> None:
@@ -126,6 +136,16 @@ class PlaybackService:
             self._start_current()
 
     def toggle_pause(self) -> None:
+        if self._using_gst_video and self._video is not None:
+            if self._video_state == STATE_PAUSED:
+                self._video.set_paused(False)
+                self._video_state = STATE_PLAYING
+                self._emit(self.state_listeners, STATE_PLAYING)
+            else:
+                self._video.set_paused(True)
+                self._video_state = STATE_PAUSED
+                self._emit(self.state_listeners, STATE_PAUSED)
+            return
         if self.engine.state in (STATE_PLAYING, STATE_PAUSED):
             self.engine.toggle_pause()
         elif self.queue.current:
@@ -133,14 +153,43 @@ class PlaybackService:
 
     def stop(self) -> None:
         self._play_token += 1
+        self._stop_video_backend()
         self.engine.stop()
 
     def seek(self, seconds: float) -> None:
+        if self._using_gst_video and self._video is not None:
+            self._video.seek(seconds)
+            return
         self.engine.seek(seconds)
 
     def set_volume(self, volume: int) -> None:
         self.engine.set_volume(volume)
         config.settings.set("volume", int(volume))
+
+    def set_video_mode(self, enabled: bool) -> None:
+        """Toggle in-app video for the current (and following) tracks."""
+        enabled = bool(enabled)
+        if enabled == self.video_mode:
+            self._emit(self.video_listeners, self.video_mode)
+            return
+        if enabled and not gst_video_available():
+            self._emit(
+                self.error_listeners,
+                "In-app video needs gst-plugin-gtk4 — "
+                "run: sudo pacman -S gst-plugin-gtk4",
+            )
+            self.video_mode = False
+            self._emit(self.video_listeners, False)
+            return
+        self.video_mode = enabled
+        self._emit(self.video_listeners, enabled)
+        # Re-resolve current track in the new mode (keeps place in queue).
+        if self.queue.current:
+            pos = self.engine.position
+            self._start_current()
+            # Best-effort seek after a short delay is handled by the UI if needed.
+            if pos > 2 and not enabled:
+                self.engine.seek(pos)
 
     def add_next(self, tracks: list[Track]) -> None:
         self.queue.add_next(tracks)
@@ -150,9 +199,37 @@ class PlaybackService:
 
     def shutdown(self) -> None:
         self._play_token += 1
+        self._stop_video_backend()
         self.engine.shutdown()
 
     # -- internals -------------------------------------------------------------
+
+    def _stop_video_backend(self) -> None:
+        self._using_gst_video = False
+        self._video_state = STATE_STOPPED
+        if self._video_pos_id is not None:
+            try:
+                from gi.repository import GLib
+                GLib.source_remove(self._video_pos_id)
+            except Exception:  # noqa: BLE001
+                pass
+            self._video_pos_id = None
+        if self._video is not None:
+            self._video.stop()
+        self._emit(self.video_paintable_listeners, None)
+
+    def _on_engine_position(self, pos: float) -> None:
+        if self._using_gst_video:
+            return  # GStreamer poll owns the scrubber while video is on
+        self._emit(self.position_listeners, pos)
+
+    def _ensure_video_player(self) -> GstVideoPlayer:
+        if self._video is None:
+            self._video = GstVideoPlayer(dispatcher=_dispatch)
+            self._video.on_eos = self._on_track_ended
+            self._video.on_error = lambda msg: self._emit(
+                self.error_listeners, f"Video: {msg}")
+        return self._video
 
     def _start_current(self) -> None:
         track = self.queue.current
@@ -161,6 +238,7 @@ class PlaybackService:
         self._play_token += 1
         self._scrobbled_current = False
         token = self._play_token
+        self._stop_video_backend()
         self._emit(self.track_listeners, track)
 
         local = track.local_path or self.library.download_path(track.video_id)
@@ -172,13 +250,40 @@ class PlaybackService:
                 self._after_start(track)
                 return
 
-        # Resolve the stream URL off the main loop, then start playback.
-        def resolve() -> str:
-            return self.resolver.resolve(track.video_id)
+        want_video = self.video_mode and bool(track.video_id)
 
-        def done(url: str) -> None:
+        # Resolve the stream URL off the main loop, then start playback.
+        def resolve() -> tuple[str, bool]:
+            if want_video:
+                try:
+                    return self.resolver.resolve(track.video_id, video=True), True
+                except Exception:  # noqa: BLE001 — fall back to audio
+                    log.warning("video stream failed; using audio", exc_info=True)
+            return self.resolver.resolve(track.video_id, video=False), False
+
+        def done(result) -> None:
             if token != self._play_token:
                 return  # user already skipped elsewhere
+            url, is_video = result
+            if is_video and self.video_mode and gst_video_available():
+                try:
+                    self.engine.stop()  # audio from GStreamer instead
+                    player = self._ensure_video_player()
+                    player.play_uri(url)
+                    self._using_gst_video = True
+                    self._video_state = STATE_PLAYING
+                    self._emit(self.video_paintable_listeners, player.paintable)
+                    self._emit(self.state_listeners, STATE_PLAYING)
+                    self._start_video_position_poll()
+                    self._after_start(track)
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("GStreamer video failed: %s", exc)
+                    self._stop_video_backend()
+                    self._emit(
+                        self.error_listeners,
+                        f"Couldn't show video — playing audio only ({exc})",
+                    )
             self.engine.play_uri(url)
             self._after_start(track)
 
@@ -193,6 +298,27 @@ class PlaybackService:
 
         self._emit(self.state_listeners, STATE_LOADING)
         run_async(resolve, done, error, name="riff-resolve")
+
+    def _start_video_position_poll(self) -> None:
+        if self._video_pos_id is not None:
+            return
+        try:
+            from gi.repository import GLib
+        except ImportError:
+            return
+
+        def tick() -> bool:
+            if not self._using_gst_video or self._video is None:
+                self._video_pos_id = None
+                return False
+            pos = self._video.position()
+            dur = self._video.duration()
+            self._emit(self.position_listeners, pos)
+            if dur > 0:
+                self._emit(self.duration_listeners, dur)
+            return True
+
+        self._video_pos_id = GLib.timeout_add(250, tick)
 
     def _after_start(self, track: Track) -> None:
         run_async(lambda: self.library.record_play(track), name="riff-history")

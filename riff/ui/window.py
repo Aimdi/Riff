@@ -45,6 +45,19 @@ CSS = b"""
     background-color: @headerbar_bg_color;
     border-top: 1px solid @borders;
 }
+.riff-video-panel {
+    background-color: #000000;
+    border-top: 1px solid alpha(@borders, 0.6);
+}
+.riff-video-frame {
+    background-color: #000000;
+    min-height: 200px;
+}
+button.riff-video-toggle {
+    padding: 0;
+    min-height: 22px;
+    min-width: 22px;
+}
 /* Compact Home "For you" chips */
 button.riff-for-you-chip {
     padding: 0;
@@ -289,12 +302,16 @@ class MainWindow(Adw.ApplicationWindow):
         self.queue_split.set_min_sidebar_width(300)
         self.queue_split.set_max_sidebar_width(340)
 
-        # player bar + toasts ---------------------------------------------------
+        # player bar + optional in-app video + toasts ---------------------------
+        from .video_panel import VideoPanel
+
+        self.video_panel = VideoPanel(self)
         self.player_bar = PlayerBar(self)
         self.player_bar.queue_btn.connect("toggled", self._on_queue_toggle)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.append(self.queue_split)
+        outer.append(self.video_panel)
         outer.append(self.player_bar)
 
         self.toaster = Adw.ToastOverlay()
@@ -302,6 +319,9 @@ class MainWindow(Adw.ApplicationWindow):
         self.set_content(self.toaster)
 
         self.service.error_listeners.append(self.toast)
+        self.service.video_listeners.append(self._on_video_mode)
+        self.service.video_paintable_listeners.append(
+            self.video_panel.set_paintable)
         self._install_actions()
         self.connect("close-request", self._on_close)
 
@@ -734,6 +754,22 @@ class MainWindow(Adw.ApplicationWindow):
 
     def _on_queue_toggle(self, btn) -> None:
         self.queue_split.set_show_sidebar(btn.get_active())
+
+    def set_video_mode(self, enabled: bool) -> None:
+        """Show/hide the in-app video surface and switch stream mode."""
+        self.service.set_video_mode(bool(enabled))
+
+    def toggle_video_mode(self) -> None:
+        self.set_video_mode(not self.service.video_mode)
+
+    def _on_video_mode(self, enabled: bool) -> None:
+        self.video_panel.set_open(enabled)
+        if hasattr(self.player_bar, "set_video_active"):
+            self.player_bar.set_video_active(enabled)
+        if enabled:
+            self.video_panel.set_status("Loading video…")
+        else:
+            self.video_panel.set_paintable(None)
 
     # -- helpers used by widgets ------------------------------------------------
 

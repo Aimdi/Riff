@@ -54,13 +54,13 @@ class FakeResolver:
         self.resolved = []
         self.fail_ids = set()
 
-    def cached(self, video_id):
+    def cached(self, video_id, *, video=False):
         return None
 
-    def resolve(self, video_id):
+    def resolve(self, video_id, *, video=False):
         if video_id in self.fail_ids:
             raise RuntimeError("boom")
-        self.resolved.append(video_id)
+        self.resolved.append((video_id, video))
         return f"https://stream/{video_id}"
 
 
