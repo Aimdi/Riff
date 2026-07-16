@@ -8,6 +8,7 @@ from gi.repository import Adw, Gtk
 
 from .. import config
 from ..core.api import AUTH_PATH
+from . import theme
 
 _QUALITIES = ["high", "medium", "low"]
 _QUALITY_LABELS = ["High (best available)", "Medium (~160 kbps)", "Low (~96 kbps)"]
@@ -22,6 +23,24 @@ class SettingsDialog(Adw.PreferencesDialog):
         page = Adw.PreferencesPage()
         page.set_title("General")
         page.set_icon_name("emblem-system-symbolic")
+
+        # -- appearance --------------------------------------------------------
+        appearance = Adw.PreferencesGroup()
+        appearance.set_title("Appearance")
+
+        self._theme_keys = list(theme.THEMES)
+        theme_row = Adw.ComboRow()
+        theme_row.set_title("Theme")
+        theme_row.set_subtitle("Pitch Black: true black, easy on OLED screens")
+        theme_row.set_model(Gtk.StringList.new(
+            [theme.THEMES[k].label for k in self._theme_keys]))
+        current_theme = str(config.settings.get("theme", theme.DEFAULT_THEME))
+        theme_row.set_selected(
+            self._theme_keys.index(current_theme)
+            if current_theme in self._theme_keys else 0)
+        theme_row.connect("notify::selected", self._on_theme)
+        appearance.add(theme_row)
+        page.add(appearance)
 
         # -- playback --------------------------------------------------------
         playback = Adw.PreferencesGroup()
@@ -163,6 +182,11 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _save(self, key: str, value: str) -> None:
         config.settings.set(key, value.strip())
         self.window.toast("Saved")
+
+    def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
+        key = self._theme_keys[row.get_selected()]
+        config.settings.set("theme", key)
+        theme.apply(key)
 
     def _on_provider(self, row: Adw.ComboRow, _pspec) -> None:
         config.settings.set(

@@ -1,6 +1,6 @@
-## Riff 0.7.0 🎵
+## Riff 0.8.0 🎵
 
-Spotify-style keyboard shortcuts across the app — like (Alt+Shift+B), shuffle (Alt+S), repeat (Alt+R), volume (Alt+↑/↓), page navigation (Alt+Shift+H/S/T/1), queue and sidebar toggles, mini player, and more — with a Keyboard Shortcuts overlay on Ctrl+/ or ? showing everything with keycaps. Plus a profile: click the avatar in the header to set your name and profile picture (shown Spotify-style top right, stored locally).
+New **Pitch Black** theme — and it's now the default: true-black backgrounds everywhere with a green accent, in the spirit of Notesnook's Pitch Black (perfect for OLED). Pick your look under Settings → Appearance: Pitch Black, Dark, Light, or Follow system — switches apply instantly, no restart.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

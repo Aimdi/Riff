@@ -39,6 +39,7 @@ DEFAULTS = {
     "listenbrainz_token": "",
     "local_music_dir": "~/Music",
     "sidebar_collapsed": False,
+    "theme": "pitch-black",  # see riff/ui/theme.py THEMES
     "profile_name": "",
     "profile_picture": "",
     "window_width": 1100,

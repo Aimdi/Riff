@@ -19,6 +19,7 @@ from .core.library import Library  # noqa: E402
 from .core.player import PlayerEngine  # noqa: E402
 from .core.service import PlaybackService  # noqa: E402
 from .mpris import MprisServer  # noqa: E402
+from .ui import theme  # noqa: E402
 from .ui.window import MainWindow  # noqa: E402
 
 log = logging.getLogger("riff")
@@ -43,6 +44,7 @@ class RiffApplication(Adw.Application):
             return
 
         config.ensure_dirs()
+        theme.apply(str(config.settings.get("theme", theme.DEFAULT_THEME)))
         self._register_bundled_icons()
         api = MusicApi()
         library = Library(config.DB_PATH)
