@@ -1,6 +1,6 @@
-## Riff 0.14.0 🎵
+## Riff 0.15.0 🎵
 
-**Spotify playlists, the Spotube way.** Menu → *Import from Spotify…*: paste any public Spotify playlist or album link — Riff reads the track list from Spotify (anonymously, no account or API key) and matches every song on YouTube Music into a local playlist, with duration-aware matching so you get the real recordings, not sped-up covers. One-click classics included (Today's Top Hits, RapCaviar, lofi beats, …); re-import any time to pull playlist updates.
+**Home, the Spotify way.** The Home page now opens with a time-of-day greeting (using your profile name) and a Spotify-style shortcut grid: a gradient Liked Songs tile, your ✨ AI Mix, and your most recent playlists as compact cover+name tiles — one click from anything you play daily. Album and playlist cards everywhere gained Spotify's hover play button: a green circle appears over the artwork and starts the music immediately, without opening the page first.
 
 ### What’s new since 0.8.0
 

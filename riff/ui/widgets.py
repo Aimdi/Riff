@@ -351,6 +351,28 @@ class MediaCard(Gtk.FlowBoxChild):
         art.set_url(getattr(item, "thumbnail", ""))
         box.append(art)
 
+        # Spotify-style hover play: green circle over the artwork that
+        # starts the album/playlist right away (artists just open).
+        self._play_btn = None
+        if not isinstance(item, Artist):
+            play = Gtk.Button()
+            glyph = Gtk.Label(label="▶")
+            glyph.add_css_class("riff-heart")
+            play.set_child(glyph)
+            play.add_css_class("riff-card-play")
+            play.set_halign(Gtk.Align.END)
+            play.set_valign(Gtk.Align.START)
+            play.set_margin_top(max(0, size - 40))
+            play.set_margin_end(14)
+            play.set_visible(False)
+            play.set_tooltip_text("Play")
+            play.connect("clicked", self._on_play)
+            self._play_btn = play
+            hover = Gtk.EventControllerMotion()
+            hover.connect("enter", lambda *_: play.set_visible(True))
+            hover.connect("leave", lambda *_: play.set_visible(False))
+            self.add_controller(hover)
+
         title = getattr(item, "title", "") or getattr(item, "name", "")
         title_label = _ellipsized(title, ["heading"])
         title_label.set_max_width_chars(18)
@@ -363,7 +385,49 @@ class MediaCard(Gtk.FlowBoxChild):
             box.append(sub)
 
         button.set_child(box)
-        self.set_child(button)
+        if self._play_btn is not None:
+            overlay = Gtk.Overlay()
+            overlay.set_child(button)
+            overlay.add_overlay(self._play_btn)
+            self.set_child(overlay)
+        else:
+            self.set_child(button)
+
+    def _on_play(self, _btn) -> None:
+        """Play this card's content immediately (Spotify hover behaviour)."""
+        from ..util import run_async
+
+        item = self.item
+        window = self._window
+        if isinstance(item, Track):
+            window.service.play_track_with_radio(item)
+            return
+
+        def work():
+            if isinstance(item, Album):
+                return window.api.album(item.browse_id).tracks
+            if isinstance(item, Playlist):
+                pid = item.playlist_id or ""
+                if pid == "action:ai-mix":
+                    return None  # handled below on the main loop
+                if pid.startswith("local:"):
+                    return window.library.playlist_tracks(
+                        int(pid.split(":", 1)[1]))
+                return window.api.playlist(pid).tracks
+            return []
+
+        def done(tracks) -> None:
+            if tracks is None:
+                window.start_ai_mix()
+            elif tracks:
+                window.service.play_tracks(tracks)
+            else:
+                self._on_clicked(None)  # nothing to play — open it instead
+
+        def fail(_exc: Exception) -> None:
+            self._on_clicked(None)
+
+        run_async(work, done, fail, name="riff-card-play")
 
     def _subtitle(self) -> str:
         item = self.item

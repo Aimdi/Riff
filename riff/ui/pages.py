@@ -5,10 +5,11 @@ from __future__ import annotations
 import logging
 import random
 
-from gi.repository import Adw, Gtk
+from gi.repository import Adw, Gtk, Pango
 
 log = logging.getLogger("riff.pages")
 
+from .. import config
 from ..core.models import Album, Artist, Playlist, Track
 from ..util import run_async
 from . import iconutil
@@ -88,6 +89,16 @@ class HomePage(ContentPage):
         box.set_margin_start(18)
         box.set_margin_end(18)
 
+        # Spotify-style greeting + shortcut grid (Liked Songs, AI Mix,
+        # recent playlists), then the personalized strips below.
+        try:
+            box.append(self._greeting_header())
+            shortcuts = self._shortcut_grid()
+            if shortcuts is not None:
+                box.append(shortcuts)
+        except Exception:  # noqa: BLE001 — Home must render regardless
+            log.exception("shortcut grid failed")
+
         # Top strip: For you (AI / smart picks) → followed releases → YT home.
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         box.append(top)
@@ -132,6 +143,114 @@ class HomePage(ContentPage):
 
         self.show_widget(scroll_wrap(box))
         self._load_followed_releases(top)
+
+    def _greeting_header(self) -> Gtk.Label:
+        import datetime
+
+        hour = datetime.datetime.now().hour
+        if hour < 6:
+            text = "Good night"
+        elif hour < 12:
+            text = "Good morning"
+        elif hour < 18:
+            text = "Good afternoon"
+        else:
+            text = "Good evening"
+        name = str(config.settings.get("profile_name", "") or "").strip()
+        if name:
+            text = f"{text}, {name.split()[0]}"
+        label = Gtk.Label(label=text)
+        label.add_css_class("title-1")
+        label.set_xalign(0.0)
+        return label
+
+    def _shortcut_grid(self) -> Gtk.Widget | None:
+        """Spotify's greeting grid: compact cover-left tiles for the stuff
+        you reach for daily — Liked Songs, AI Mix, your playlists."""
+        from .window import AI_MIX_PLAYLIST
+
+        window = self.window
+        tiles: list[tuple] = []  # (title, cover, glyph, callback)
+
+        n_favs = len(window.library.favorites())
+        if n_favs:
+            tiles.append(("Liked Songs", None, "♥",
+                          lambda: window.goto("favorites")))
+
+        seen_names = set()
+        ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
+        if ai_pid is not None:
+            tracks = window.library.playlist_tracks(ai_pid)
+            if tracks:
+                seen_names.add(AI_MIX_PLAYLIST)
+                tiles.append((
+                    AI_MIX_PLAYLIST,
+                    [t.thumbnail for t in tracks[:8]], None,
+                    lambda p=ai_pid: window.open_local_playlist(
+                        p, AI_MIX_PLAYLIST)))
+
+        for item in window.library.playlist_tree():
+            entries = ([(item["id"], item["name"])]
+                       if item["kind"] == "playlist"
+                       else [(pid, name)
+                             for pid, name, _c in item["playlists"]])
+            for pid, name in entries:
+                if len(tiles) >= 8:
+                    break
+                if name in seen_names:
+                    continue
+                seen_names.add(name)
+                tracks = window.library.playlist_tracks(pid)
+                if not tracks:
+                    continue
+                tiles.append((
+                    name, [t.thumbnail for t in tracks[:8]], None,
+                    lambda p=pid, n=name: window.open_local_playlist(p, n)))
+
+        if len(tiles) < 8:
+            recent = window.library.recent(1)
+            if recent:
+                tiles.append(("Recently played", [
+                    t.thumbnail for t in window.library.recent(8)], None,
+                    lambda: window.goto("history")))
+
+        if not tiles:
+            return None
+
+        grid = Gtk.FlowBox()
+        grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        grid.set_homogeneous(True)
+        grid.set_min_children_per_line(2)
+        grid.set_max_children_per_line(4)
+        grid.set_column_spacing(10)
+        grid.set_row_spacing(10)
+        for title, cover, glyph, cb in tiles[:8]:
+            grid.append(self._shortcut_tile(title, cover, glyph, cb))
+        return grid
+
+    def _shortcut_tile(self, title: str, cover, glyph, callback):
+        btn = Gtk.Button()
+        btn.add_css_class("riff-shortcut")
+        btn.connect("clicked", lambda *_: callback())
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        if glyph:
+            tile = Gtk.Label(label=glyph)
+            tile.add_css_class("riff-liked-tile")
+            tile.set_size_request(56, 56)
+        else:
+            tile = CoverArt(56, icon="view-list-symbolic")
+            tile.set_urls(cover or [])
+        row.append(tile)
+        label = Gtk.Label(label=title)
+        label.add_css_class("heading")
+        label.set_xalign(0.0)
+        label.set_hexpand(True)
+        label.set_ellipsize(Pango.EllipsizeMode.END)
+        row.append(label)
+        btn.set_child(row)
+        child = Gtk.FlowBoxChild()
+        child.set_child(btn)
+        return child
 
     def _cached_for_you(self) -> list[Track]:
         from .window import AI_MIX_PLAYLIST

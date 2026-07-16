@@ -115,6 +115,34 @@ button.riff-cover-link {
     font-size: 17px;
     font-weight: 700;
 }
+/* Spotify-style Home shortcut tiles (greeting grid). */
+button.riff-shortcut {
+    background-color: alpha(currentColor, 0.07);
+    border-radius: 8px;
+    padding: 0;
+    min-height: 56px;
+}
+button.riff-shortcut:hover {
+    background-color: alpha(currentColor, 0.15);
+}
+.riff-liked-tile {
+    background: linear-gradient(135deg, #4526c8, #9a6aff);
+    border-radius: 8px;
+    color: #ffffff;
+    font-size: 20px;
+}
+/* Spotify-style hover play button on cards. */
+button.riff-card-play {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
+    border-radius: 9999px;
+    min-width: 42px;
+    min-height: 42px;
+    padding: 0;
+}
+button.riff-card-play:hover {
+    background-color: @accent_color;
+}
 button.dim-label .riff-heart {
     opacity: 0.55;
 }
