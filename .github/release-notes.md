@@ -1,6 +1,6 @@
-## Riff 0.2.3 🎵
+## Riff 0.2.4 🎵
 
-The favorite heart and per-song ⋮ menu are now drawn as text glyphs instead of theme icons — they render on every desktop, icon theme, and distro, unconditionally. This closes the KDE/Breeze invisible-buttons saga for good: grey ♥ = not favorited, accent-colored ♥ = favorited. Hearts appear on every song row, in the player bar, and ⋮ menus on queue rows.
+Fixes the Explore page erroring out: charts and mood/genre categories now load independently (one failing no longer blanks the whole page), public browse endpoints automatically retry anonymously when the account-authenticated request fails, and if everything truly fails the page shows the underlying error with a retry button.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

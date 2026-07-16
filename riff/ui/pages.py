@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import random
 
 from gi.repository import Adw, Gtk
+
+log = logging.getLogger("riff.pages")
 
 from ..core.models import Album, Artist, Playlist, Track
 from ..util import run_async
@@ -242,19 +245,32 @@ class ExplorePage(ContentPage):
             return
 
         def work():
+            # Each source can fail independently (some endpoints behave
+            # differently for authenticated accounts) — show whatever loads
+            # and only fail the page when nothing at all came back.
             api = self.window.api
-            return api.charts(), api.mood_categories()
+            problems = []
+            try:
+                categories = api.mood_categories()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("mood categories failed", exc_info=True)
+                categories = []
+                problems.append(f"categories: {exc}")
+            try:
+                charts = api.charts()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("charts failed", exc_info=True)
+                charts = []
+                problems.append(f"charts: {exc}")
+            if not charts and not categories:
+                raise RuntimeError("; ".join(problems) or "nothing returned")
+            return charts, categories
 
         self.load_async(work, self._present)
 
     def _present(self, data) -> None:
         self._loaded = True
         charts, categories = data
-        if not charts and not categories:
-            self.show_widget(status_page(
-                "web-browser-symbolic", "Explore is unavailable",
-                "Couldn't load charts or categories right now."))
-            return
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
         if charts:
             title = Gtk.Label(label="Top songs worldwide")

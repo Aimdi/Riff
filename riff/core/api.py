@@ -37,6 +37,7 @@ log = logging.getLogger("riff.api")
 class MusicApi:
     def __init__(self) -> None:
         self._yt: YTMusic | None = None
+        self._yt_anon: YTMusic | None = None
         self._lock = threading.Lock()
 
     @property
@@ -54,6 +55,30 @@ class MusicApi:
     @property
     def authenticated(self) -> bool:
         return os.path.exists(AUTH_PATH)
+
+    @property
+    def yt_anon(self) -> YTMusic:
+        """Anonymous client — used as fallback for public browse endpoints
+        that occasionally misbehave with account credentials attached."""
+        with self._lock:
+            if self._yt_anon is None:
+                if self._yt is not None and not self.authenticated:
+                    self._yt_anon = self._yt
+                else:
+                    self._yt_anon = YTMusic()
+            return self._yt_anon
+
+    def _browse_with_fallback(self, call):
+        """Run `call(client)` with the main client, retrying anonymously when
+        an authenticated request fails on a public endpoint."""
+        try:
+            return call(self.yt)
+        except Exception:
+            if not self.authenticated:
+                raise
+            log.warning("authenticated browse failed; retrying anonymously",
+                        exc_info=True)
+            return call(self.yt_anon)
 
     # -- search ------------------------------------------------------------
 
@@ -242,8 +267,9 @@ class MusicApi:
 
     def mood_categories(self) -> list[tuple[str, list[tuple[str, str]]]]:
         """[(section title, [(category title, params), …]), …]"""
+        data = self._browse_with_fallback(lambda yt: yt.get_mood_categories())
         out = []
-        for section, cats in (self.yt.get_mood_categories() or {}).items():
+        for section, cats in (data or {}).items():
             items = [
                 (c.get("title") or "", c.get("params") or "")
                 for c in cats or []
@@ -254,8 +280,10 @@ class MusicApi:
         return out
 
     def mood_playlists(self, params: str) -> list[Playlist]:
+        data = self._browse_with_fallback(
+            lambda yt: yt.get_mood_playlists(params))
         out = []
-        for p in self.yt.get_mood_playlists(params) or []:
+        for p in data or []:
             if not p.get("playlistId"):
                 continue
             out.append(
@@ -271,9 +299,10 @@ class MusicApi:
     def charts(self) -> list[Track]:
         """Global top songs; empty list when charts are unavailable."""
         try:
-            data = self.yt.get_charts(country="ZZ")
+            data = self._browse_with_fallback(
+                lambda yt: yt.get_charts(country="ZZ"))
         except Exception:  # noqa: BLE001 — some locales/accounts lack charts
-            log.debug("charts unavailable", exc_info=True)
+            log.warning("charts unavailable", exc_info=True)
             return []
         tracks = []
         for v in (data.get("videos") or {}).get("items") or []:
