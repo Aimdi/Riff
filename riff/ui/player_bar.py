@@ -11,6 +11,7 @@ from ..core.queue import REPEAT_ALL, REPEAT_ONE
 from . import iconutil
 from .widgets import (
     CoverArt,
+    FixedSquare,
     _ellipsized,
     build_track_menu,
     heart_button,
@@ -115,11 +116,15 @@ class PlayerBar(Gtk.Box):
         self.video_picture.set_content_fit(Gtk.ContentFit.COVER)
         self.video_picture.set_size_request(self._art_size, self._art_size)
         self.video_picture.set_can_shrink(True)
-        try:
-            self.video_picture.set_overflow(Gtk.Overflow.HIDDEN)
-        except AttributeError:
-            pass
-        self.art_stack.add_named(self.video_picture, "video")
+        # Hard-clamp the slot: a live video paintable reports the full video
+        # resolution as its natural size, which would blow the bar up to
+        # video size — FixedSquare crops it into the cover-art square.
+        video_frame = FixedSquare(self._art_size)
+        video_frame.add_css_class("riff-cover")
+        video_frame.set_halign(Gtk.Align.CENTER)
+        video_frame.set_valign(Gtk.Align.CENTER)
+        video_frame.set_child(self.video_picture)
+        self.art_stack.add_named(video_frame, "video")
         self.art_stack.set_visible_child_name("art")
 
         art_box = Gtk.Overlay()

@@ -1,6 +1,6 @@
-## Riff 0.12.2 🎵
+## Riff 0.12.3 🎵
 
-**In-app video + polished folders** — watch music videos in the now-playing cover slot while audio stays on mpv; folder badges match flat reference icons.
+Fix: the in-app video no longer blows up the player bar — it now plays inside the same small cover-art square as before (cropped to fit), so the bar keeps its normal height whether you're watching or not.
 
 ### What’s new since 0.8.0
 

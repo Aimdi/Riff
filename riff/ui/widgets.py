@@ -8,7 +8,29 @@ from ..core.models import Album, Artist, Playlist, Track
 from . import iconutil, images
 
 
-class CoverArt(Gtk.Frame):
+class FixedSquare(Gtk.Frame):
+    """Container that measures exactly ``size``×``size``.
+
+    ``set_size_request`` only raises the *minimum* — a child like
+    Gtk.Picture holding a large texture or a live video paintable still
+    reports the full media size as its natural size, and boxes hand out
+    natural size when space allows. Overriding measure is the only hard
+    clamp; content-fit COVER then crops the child into the square.
+    """
+
+    def __init__(self, size: int):
+        super().__init__()
+        self.size = size
+        try:
+            self.set_overflow(Gtk.Overflow.HIDDEN)
+        except AttributeError:
+            pass
+
+    def do_measure(self, orientation, for_size):
+        return (self.size, self.size, -1, -1)
+
+
+class CoverArt(FixedSquare):
     """Square cover image with rounded corners and a placeholder icon.
 
     Sized strictly to ``size``×``size``. YouTube often serves large or 16:9
@@ -18,8 +40,7 @@ class CoverArt(Gtk.Frame):
 
     def __init__(self, size: int = 48, icon: str = "audio-x-generic-symbolic",
                  circular: bool = False):
-        super().__init__()
-        self.size = size
+        super().__init__(size)
         self._url = ""
         self.add_css_class("riff-cover")
         if circular:
@@ -29,10 +50,6 @@ class CoverArt(Gtk.Frame):
         self.set_vexpand(False)
         self.set_halign(Gtk.Align.CENTER)
         self.set_valign(Gtk.Align.CENTER)
-        try:
-            self.set_overflow(Gtk.Overflow.HIDDEN)
-        except AttributeError:
-            pass
         self._picture = Gtk.Picture()
         self._configure_picture(self._picture)
         self._placeholder = iconutil.image(icon, size=max(16, size // 3))
