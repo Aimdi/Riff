@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field, asdict
 
 
@@ -26,11 +27,16 @@ def _best_thumbnail(thumbnails: list[dict] | None, prefer: int = 544) -> str:
 
 
 def upscale_thumbnail(url: str, size: int = 544) -> str:
-    """YouTube Music thumbnails encode their size in the URL; request a bigger one."""
-    if "googleusercontent.com" in url and "=w" in url:
-        base = url.rsplit("=w", 1)[0]
-        return f"{base}=w{size}-h{size}-l90-rj"
-    return url
+    """YouTube Music thumbnails encode their size in the URL; request a bigger
+    one. Only the size numbers are rewritten — other flags in the parameter
+    block (padding, format, …) must be preserved or some googleusercontent
+    variants return errors."""
+    if "googleusercontent.com" not in url and "ggpht.com" not in url:
+        return url
+    new = re.sub(r"=w\d+-h\d+", f"=w{size}-h{size}", url, count=1)
+    if new == url:
+        new = re.sub(r"=s\d+", f"=s{size}", url, count=1)
+    return new
 
 
 @dataclass

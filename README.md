@@ -70,12 +70,32 @@ python -m riff
 
 | Action | How |
 |---|---|
-| Play a song + similar songs | Click any song (starts YT Music radio) |
+| Play a song + similar songs (radio) | Click any song — radio fills the queue automatically. Or song menu (⋮) → *Start Radio* |
 | Play an album/playlist in order | Open it, press **Play** |
-| Queue management | Song menu → *Play Next* / *Add to Queue*, or the queue button (bottom right) |
-| Favorites / playlists / downloads | Song menu (⋮) on any track |
+| Queue management | ⋮ menu → *Play Next* / *Add to Queue*; view the queue with the button at the bottom right |
+| Favorite a song | Heart button on any song row, or the heart in the player bar |
+| Create a playlist | Sidebar → *Playlists* → **New Playlist** |
+| Add a song to a playlist | ⋮ menu on the song → *Add to Playlist…* |
+| Download for offline | ⋮ menu → *Download* |
 | Lyrics | Header menu → *Lyrics* |
 | Shortcuts | `Space` play/pause · `Ctrl+←/→` prev/next · `Ctrl+F` search · `Ctrl+Q` quit |
+
+### Connect your YouTube Music account (optional)
+
+Out of the box Riff is anonymous: generic charts on Home, no Google login.
+If you *want* personalized recommendations (like RiPlay's account mode), you
+can connect your account — Riff sends your browser session headers with its
+requests and nothing more; there is no extra tracking, and no credentials are
+stored beyond the file you create:
+
+```bash
+ytmusicapi browser --file ~/.config/riff/browser.json
+```
+
+Follow the prompts (copy request headers from an open music.youtube.com tab —
+see the [ytmusicapi guide](https://ytmusicapi.readthedocs.io/en/stable/setup/browser.html)),
+then restart Riff. Home, search and radio now reflect your account's taste.
+Delete the file to go back to anonymous mode.
 
 Settings (audio quality, download folder, radio autoplay) live in
 `~/.config/riff/settings.json`; the library database in

@@ -48,6 +48,26 @@ def test_upscale_thumbnail():
     assert upscale_thumbnail(other) == other
 
 
+def test_upscale_thumbnail_preserves_extra_flags():
+    # Flags after the size block (padding, crop, …) must survive the rewrite.
+    url = "https://lh3.googleusercontent.com/abc=w226-h226-p-l90-rj"
+    assert upscale_thumbnail(url, 320) == (
+        "https://lh3.googleusercontent.com/abc=w320-h320-p-l90-rj"
+    )
+
+
+def test_upscale_thumbnail_s_format():
+    url = "https://yt3.ggpht.com/abc=s88-c-k-c0x00ffffff-no-rj"
+    assert upscale_thumbnail(url, 320) == (
+        "https://yt3.ggpht.com/abc=s320-c-k-c0x00ffffff-no-rj"
+    )
+
+
+def test_upscale_thumbnail_no_size_params():
+    url = "https://lh3.googleusercontent.com/abc"
+    assert upscale_thumbnail(url, 320) == url
+
+
 def test_track_from_yt_search_shape():
     item = {
         "videoId": "abc123",

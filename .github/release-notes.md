@@ -1,6 +1,6 @@
-## Riff 0.1.1 🎵
+## Riff 0.1.2 🎵
 
-Fixes startup crash on systems with non-English locales (libmpv requires LC_NUMERIC="C"; GTK sets the locale from the environment, so the mpv engine failed to initialize e.g. on German systems).
+Fixes missing cover art on home/browse cards (thumbnail URL size rewriting broke some googleusercontent variants; now rewrites only the size numbers and falls back to the original URL). Adds a visible favorite (heart) button on every song row, surfaces radio failures as toasts instead of failing silently, and adds an optional YouTube Music account connection for personalized recommendations (see README).
 
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 

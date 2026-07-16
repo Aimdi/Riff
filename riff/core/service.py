@@ -203,9 +203,14 @@ class PlaybackService:
             if cur and cur.video_id == seed.video_id and tracks:
                 self.queue.add_end(tracks)
                 self._prefetch_next()
+            elif not tracks:
+                log.warning("radio for %s returned no tracks", seed.video_id)
 
-        def error(_exc: Exception) -> None:
+        def error(exc: Exception) -> None:
             self._radio_pending = False
+            log.warning("radio fetch failed for %s: %s", seed.video_id, exc)
+            self._emit(self.error_listeners,
+                       "Radio unavailable — playing this song only")
 
         run_async(fetch, done, error, name="riff-radio")
 
@@ -235,7 +240,10 @@ class PlaybackService:
             if self.queue.next(manual=False):
                 self._start_current()
 
-        def error(_exc: Exception) -> None:
+        def error(exc: Exception) -> None:
+            log.warning("radio continuation failed: %s", exc)
+            self._emit(self.error_listeners,
+                       "Couldn't continue with radio — queue ended")
             self._emit(self.state_listeners, STATE_STOPPED)
 
         run_async(fetch, done, error, name="riff-radio-continue")

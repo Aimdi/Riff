@@ -97,10 +97,20 @@ class TrackRow(Gtk.ListBoxRow):
             dur.add_css_class("numeric")
             box.append(dur)
 
+        self._fav_btn = Gtk.Button.new_from_icon_name("emblem-favorite-symbolic")
+        self._fav_btn.add_css_class("flat")
+        self._fav_btn.set_valign(Gtk.Align.CENTER)
+        self._fav_btn.set_tooltip_text("Favorite")
+        if window.library.is_favorite(track.video_id):
+            self._fav_btn.add_css_class("accent")
+        self._fav_btn.connect("clicked", lambda *_: self._toggle_favorite())
+        box.append(self._fav_btn)
+
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("view-more-symbolic")
         menu_btn.add_css_class("flat")
         menu_btn.set_valign(Gtk.Align.CENTER)
+        menu_btn.set_tooltip_text("More actions")
         menu_btn.set_menu_model(self._build_menu())
         self._install_actions()
         box.append(menu_btn)
@@ -154,6 +164,10 @@ class TrackRow(Gtk.ListBoxRow):
 
     def _toggle_favorite(self) -> None:
         added = self._window.library.toggle_favorite(self.track)
+        if added:
+            self._fav_btn.add_css_class("accent")
+        else:
+            self._fav_btn.remove_css_class("accent")
         self._window.toast("Added to favorites" if added else "Removed from favorites")
 
     def _go_artist(self) -> None:

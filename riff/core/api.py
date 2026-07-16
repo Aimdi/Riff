@@ -8,9 +8,18 @@ shape and we never want one odd item to take a whole page down.
 from __future__ import annotations
 
 import logging
+import os
 import threading
 
 from ytmusicapi import YTMusic
+
+from .. import config
+
+# Optional account connection: create this file with
+#   ytmusicapi browser --file ~/.config/riff/browser.json
+# and the home feed, radio and search become personalized to your
+# YouTube Music account. Riff itself stores nothing beyond this file.
+AUTH_PATH = os.path.join(config.CONFIG_DIR, "browser.json")
 
 from .models import (
     Album,
@@ -36,8 +45,15 @@ class MusicApi:
         # network is slow; YTMusic() performs a request to get a visitor id.
         with self._lock:
             if self._yt is None:
-                self._yt = YTMusic()
+                auth = AUTH_PATH if os.path.exists(AUTH_PATH) else None
+                if auth:
+                    log.info("using account credentials from %s", auth)
+                self._yt = YTMusic(auth)
             return self._yt
+
+    @property
+    def authenticated(self) -> bool:
+        return os.path.exists(AUTH_PATH)
 
     # -- search ------------------------------------------------------------
 
