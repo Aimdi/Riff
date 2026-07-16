@@ -3,7 +3,8 @@
 A theme is a libadwaita color scheme plus an optional CSS overlay that
 overrides Adwaita's named UI colors. The default is "Pitch Black" —
 true-black backgrounds with a green accent, in the spirit of Notesnook's
-Pitch Black theme (great on OLED screens).
+Pitch Black theme (great on OLED screens). Snowify-style accent variants
+reuse the same true-black surfaces with different accent colors.
 
 This module keeps its data importable without GTK; `apply()` imports gi
 lazily so unit tests can inspect the theme table headlessly.
@@ -13,11 +14,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-# Old-style @define-color names first (supported by every libadwaita
-# release), then the equivalent CSS variables used by libadwaita >= 1.6.
-# GTK's CSS parser drops rules it can't parse without discarding the rest
-# of the sheet, so the :root block is harmless on older GTK.
-_PITCH_BLACK_CSS = """
+
+def _pitch_css(accent_bg: str, accent_fg: str, accent: str) -> str:
+    """True-black surface CSS with a parameterized accent.
+
+    Old-style @define-color names first (supported by every libadwaita
+    release), then the equivalent CSS variables used by libadwaita >= 1.6.
+    GTK's CSS parser drops rules it can't parse without discarding the rest
+    of the sheet, so the :root block is harmless on older GTK.
+    """
+    return f"""
 @define-color window_bg_color #000000;
 @define-color window_fg_color #f2f2f2;
 @define-color view_bg_color #000000;
@@ -35,15 +41,15 @@ _PITCH_BLACK_CSS = """
 @define-color popover_fg_color #f2f2f2;
 @define-color dialog_bg_color #0a0a0a;
 @define-color dialog_fg_color #f2f2f2;
-@define-color accent_bg_color #008837;
-@define-color accent_fg_color #ffffff;
-@define-color accent_color #2fd96e;
+@define-color accent_bg_color {accent_bg};
+@define-color accent_fg_color {accent_fg};
+@define-color accent_color {accent};
 
-headerbar, .riff-player-bar {
+headerbar, .riff-player-bar {{
     border-color: rgba(255, 255, 255, 0.08);
-}
+}}
 
-:root {
+:root {{
     --window-bg-color: #000000;
     --window-fg-color: #f2f2f2;
     --view-bg-color: #000000;
@@ -61,10 +67,25 @@ headerbar, .riff-player-bar {
     --popover-fg-color: #f2f2f2;
     --dialog-bg-color: #0a0a0a;
     --dialog-fg-color: #f2f2f2;
-    --accent-bg-color: #008837;
-    --accent-fg-color: #ffffff;
-    --accent-color: #2fd96e;
-}
+    --accent-bg-color: {accent_bg};
+    --accent-fg-color: {accent_fg};
+    --accent-color: {accent};
+}}
+"""
+
+
+def _accent_only_css(accent_bg: str, accent_fg: str, accent: str) -> str:
+    """Accent recolor on top of stock Adwaita (for the light Snow theme)."""
+    return f"""
+@define-color accent_bg_color {accent_bg};
+@define-color accent_fg_color {accent_fg};
+@define-color accent_color {accent};
+
+:root {{
+    --accent-bg-color: {accent_bg};
+    --accent-fg-color: {accent_fg};
+    --accent-color: {accent};
+}}
 """
 
 
@@ -76,7 +97,24 @@ class Theme:
 
 
 THEMES: dict[str, Theme] = {
-    "pitch-black": Theme("Pitch Black", "force-dark", _PITCH_BLACK_CSS),
+    "pitch-black": Theme(
+        "Pitch Black", "force-dark",
+        _pitch_css("#008837", "#ffffff", "#2fd96e")),
+    "pitch-blue": Theme(
+        "Pitch Black · Blue", "force-dark",
+        _pitch_css("#1a6ee8", "#ffffff", "#69a9ff")),
+    "pitch-violet": Theme(
+        "Pitch Black · Violet", "force-dark",
+        _pitch_css("#7c3aed", "#ffffff", "#b78cff")),
+    "pitch-crimson": Theme(
+        "Pitch Black · Crimson", "force-dark",
+        _pitch_css("#d81b4b", "#ffffff", "#ff6b8a")),
+    "pitch-amber": Theme(
+        "Pitch Black · Amber", "force-dark",
+        _pitch_css("#c77800", "#ffffff", "#ffb340")),
+    "snow": Theme(
+        "Snow (light)", "force-light",
+        _accent_only_css("#2563eb", "#ffffff", "#1d4ed8")),
     "dark": Theme("Dark", "force-dark"),
     "light": Theme("Light", "force-light"),
     "system": Theme("Follow system", "default"),

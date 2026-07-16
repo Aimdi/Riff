@@ -89,6 +89,26 @@ class CoverArt(FixedSquare):
 
         images.load_texture(url, max(self.size * 2, 96), apply)
 
+    def set_urls(self, urls: list[str]) -> None:
+        """Cover from several tracks: 2×2 collage when 4 distinct images
+        exist (auto-generated playlist covers), else the first cover."""
+        urls = [u for u in urls if u]
+        marker = "collage:" + "|".join(urls[:4])
+        if marker == self._url:
+            return
+        if len({u for u in urls}) < 4:
+            self.set_url(urls[0] if urls else "")
+            return
+        self._url = marker
+
+        def apply(texture) -> None:
+            if texture is not None and self._url == marker:
+                self._configure_picture(self._picture)
+                self._picture.set_paintable(texture)
+                self.set_child(self._picture)
+
+        images.load_collage(urls, max(self.size * 2, 96), apply)
+
 
 def heart_button(is_favorite: bool = False, tooltip: str = "Favorite") -> Gtk.Button:
     """Favorite button drawn with a text glyph.

@@ -32,8 +32,13 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
 - 📻 **ListenBrainz scrobbling** (optional)
 - 🗂️ **Local files** — index a folder of MP3/FLAC/OGG and play alongside streams
 - 🪟 **Mini player** — compact art + controls window
-- 🖤 **Pitch Black theme** (default) — true-black OLED-friendly look with a
-  green accent; Dark / Light / System also available in Settings → Appearance
+- 🖤 **Theme gallery** — Pitch Black (default, true-black OLED-friendly with
+  a green accent) plus Blue / Violet / Crimson / Amber accent variants, a
+  light “Snow” theme, and Dark / Light / System — Settings → Appearance
+- 🖼️ **Auto-generated playlist covers** — playlists without artwork get a
+  2×2 collage of their songs' covers (like Snowify/Spotify)
+- 🎮 **Discord Rich Presence** (optional) — show what you're listening to;
+  Settings → Discord Rich Presence
 - 🚫 No ads, no tracking, no Google account required
 
 ## Install on CachyOS / Arch

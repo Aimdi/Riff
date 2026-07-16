@@ -99,6 +99,35 @@ class SettingsDialog(Adw.PreferencesDialog):
         scrobble.add(lb_row)
         page.add(scrobble)
 
+        # -- Discord Rich Presence -------------------------------------------
+        discord = Adw.PreferencesGroup()
+        discord.set_title("Discord Rich Presence")
+        discord.set_description(
+            "Optional: show what you're listening to on Discord (like "
+            "Snowify). Create a free application named “Riff” at "
+            "discord.com/developers/applications and paste its "
+            "Application ID here. Needs the Discord app running.")
+
+        rpc_switch = Adw.SwitchRow()
+        rpc_switch.set_title("Show current song on Discord")
+        rpc_switch.set_active(
+            bool(config.settings.get("discord_rpc_enabled", False)))
+        rpc_switch.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "discord_rpc_enabled", bool(row.get_active())))
+        discord.add(rpc_switch)
+
+        rpc_id = Adw.EntryRow()
+        rpc_id.set_title("Discord Application ID")
+        rpc_id.set_text(
+            str(config.settings.get("discord_client_id", "") or ""))
+        rpc_id.set_show_apply_button(True)
+        rpc_id.connect("apply", lambda row: self._save(
+            "discord_client_id", row.get_text()))
+        discord.add(rpc_id)
+        page.add(discord)
+
         # -- account -----------------------------------------------------------
         account = Adw.PreferencesGroup()
         account.set_title("YouTube Music account")

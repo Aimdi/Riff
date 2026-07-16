@@ -1,6 +1,6 @@
-## Riff 0.12.3 🎵
+## Riff 0.13.0 🎵
 
-Fix: the in-app video no longer blows up the player bar — it now plays inside the same small cover-art square as before (cropped to fit), so the bar keeps its normal height whether you're watching or not.
+**Playback fixed + Snowify-inspired goodies.** Songs stopped playing because YouTube broke the pinned yt-dlp player clients — the resolver now tries yt-dlp's own defaults first and falls back through alternate clients, resolving songs via music.youtube.com again (if it still fails, the error now tells you to update yt-dlp). New from the Snowify inspiration: a theme gallery (Pitch Black accent variants in Blue / Violet / Crimson / Amber plus a light Snow theme), auto-generated 2×2 collage covers for your playlists, and optional Discord Rich Presence (Settings → Discord Rich Presence).
 
 ### What’s new since 0.8.0
 

@@ -46,6 +46,17 @@ class StreamResolver:
             self._cache.pop(key, None)
         return None
 
+    # Tried in order until one yields a stream. YouTube regularly breaks
+    # individual player clients (PO-token requirements etc.), so never rely
+    # on a single pinned client: yt-dlp's own defaults come first — its
+    # maintainers update them as YouTube changes — with explicit clients as
+    # fallbacks.
+    _CLIENT_ATTEMPTS: tuple[tuple[str, ...] | None, ...] = (
+        None,                    # yt-dlp defaults
+        ("android", "web"),      # historic riff behavior
+        ("web_music", "ios"),    # music-specific / least-gated alternates
+    )
+
     def resolve(self, video_id: str, *, video: bool = False) -> str:
         """Blocking: returns a playable URL. Raises on failure.
 
@@ -56,36 +67,56 @@ class StreamResolver:
         if hit:
             return hit
 
-        import yt_dlp
-
         fmt = (
             _VIDEO_FORMAT
             if video
             else _QUALITY_FORMATS.get(self.quality, _QUALITY_FORMATS["high"])
         )
+        # music.youtube.com is noticeably less bot-gated for songs; plain
+        # watch pages are only needed when we want the actual video track.
+        page = ("https://www.youtube.com/watch?v=" if video
+                else "https://music.youtube.com/watch?v=")
+
+        last_error: Exception | None = None
+        for clients in self._CLIENT_ATTEMPTS:
+            try:
+                info = self._extract(page + video_id, fmt, clients)
+            except Exception as exc:  # noqa: BLE001 — try the next client set
+                last_error = exc
+                log.warning("extract failed (clients=%s): %s", clients, exc)
+                continue
+            url = (self._pick_video_url(info) if video
+                   else self._pick_audio_url(info))
+            if url:
+                key = (video_id, "video" if video else "audio")
+                with self._lock:
+                    self._cache[key] = (time.monotonic(), url)
+                return url
+            last_error = RuntimeError("no stream in response")
+            log.warning("no usable stream (clients=%s) for %s",
+                        clients, video_id)
+        raise RuntimeError(
+            f"{last_error} — if this keeps happening, update yt-dlp "
+            "(sudo pacman -Syu yt-dlp): YouTube changes often and old "
+            "yt-dlp versions stop working"
+        )
+
+    @staticmethod
+    def _extract(url: str, fmt: str, clients: tuple[str, ...] | None) -> dict | None:
+        import yt_dlp
+
         opts = {
             "format": fmt,
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
             "skip_download": True,
-            # Music-only content plays fine through these clients and they
-            # tend to hand out URLs that stream without throttling.
-            "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
         }
+        if clients:
+            opts["extractor_args"] = {
+                "youtube": {"player_client": list(clients)}}
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(
-                f"https://www.youtube.com/watch?v={video_id}", download=False
-            )
-        url = (
-            self._pick_video_url(info) if video else self._pick_audio_url(info)
-        )
-        if not url:
-            raise RuntimeError(f"No playable stream found for {video_id}")
-        key = (video_id, "video" if video else "audio")
-        with self._lock:
-            self._cache[key] = (time.monotonic(), url)
-        return url
+            return ydl.extract_info(url, download=False)
 
     @staticmethod
     def _pick_audio_url(info: dict | None) -> str:

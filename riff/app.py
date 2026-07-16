@@ -58,6 +58,13 @@ class RiffApplication(Adw.Application):
             self.mpris = MprisServer(self.service, app=self)
         except Exception:  # noqa: BLE001 — MPRIS is best-effort
             log.exception("MPRIS unavailable")
+        try:
+            from .core.discordrpc import PresenceManager
+
+            self.presence = PresenceManager(self.service, config.settings)
+        except Exception:  # noqa: BLE001 — presence is best-effort
+            log.exception("Discord presence unavailable")
+            self.presence = None
         self._install_accels()
         self.window.present()
         # Daily AI Mix auto-refresh, shortly after startup so it never
@@ -148,6 +155,8 @@ class RiffApplication(Adw.Application):
             self.window.pages["search"].focus()
 
     def do_shutdown(self) -> None:
+        if getattr(self, "presence", None):
+            self.presence.shutdown()
         if self.mpris:
             self.mpris.shutdown()
         if self.service:

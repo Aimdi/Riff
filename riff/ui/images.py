@@ -82,3 +82,69 @@ def load_texture(url: str, size: int, callback) -> None:
         callback(None)
 
     run_async(work, done, error, name="riff-art")
+
+
+def load_collage(urls: list[str], size: int, callback) -> None:
+    """Compose up to 4 covers into a 2×2 collage texture (Snowify-style
+    auto-generated playlist covers). Falls back to a single cover when fewer
+    than 4 distinct images are available. callback(texture|None) runs on the
+    main loop; never raises."""
+    urls = [u for u in urls if u]
+    # dedupe, keep order — an album playlist would otherwise show the same
+    # art four times.
+    seen: set[str] = set()
+    distinct = [u for u in urls if not (u in seen or seen.add(u))]
+    if len(distinct) < 4:
+        load_texture(distinct[0] if distinct else "", size, callback)
+        return
+    quad = distinct[:4]
+
+    key = "collage:" + "|".join(quad) + f":{size}"
+    tex = _memory.get(key)
+    if tex is not None:
+        callback(tex)
+        return
+
+    def work() -> Gdk.Texture | None:
+        from gi.repository import GdkPixbuf
+
+        os.makedirs(config.ART_CACHE_DIR, exist_ok=True)
+        half = max(2, size // 2)
+        out = GdkPixbuf.Pixbuf.new(
+            GdkPixbuf.Colorspace.RGB, False, 8, half * 2, half * 2)
+        out.fill(0x101010FF)
+        for i, u in enumerate(quad):
+            u2 = upscale_thumbnail(u, half)
+            path = _cache_path(u2)
+            if not os.path.exists(path):
+                try:
+                    data = _fetch(u2)
+                except Exception:  # noqa: BLE001 — retry unrewritten URL
+                    data = _fetch(u)
+                tmp = path + ".part"
+                with open(tmp, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, path)
+            pb = GdkPixbuf.Pixbuf.new_from_file(path)
+            # crop-scale to fill the quadrant (like content-fit: cover)
+            scale = max(half / pb.get_width(), half / pb.get_height())
+            w, h = int(pb.get_width() * scale), int(pb.get_height() * scale)
+            scaled = pb.scale_simple(w, h, GdkPixbuf.InterpType.BILINEAR)
+            sx, sy = max(0, (w - half) // 2), max(0, (h - half) // 2)
+            tile = scaled.new_subpixbuf(sx, sy, min(half, w), min(half, h))
+            tile.copy_area(0, 0, tile.get_width(), tile.get_height(),
+                           out, (i % 2) * half, (i // 2) * half)
+        return Gdk.Texture.new_for_pixbuf(out)
+
+    def done(texture: Gdk.Texture | None) -> None:
+        if texture is not None:
+            if len(_memory) > _MEMORY_LIMIT:
+                _memory.clear()
+            _memory[key] = texture
+        callback(texture)
+
+    def error(exc: Exception) -> None:
+        log.warning("collage failed (%s); using first cover", exc)
+        load_texture(quad[0], size, callback)
+
+    run_async(work, done, error, name="riff-collage")

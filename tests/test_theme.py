@@ -35,3 +35,26 @@ def test_default_setting_matches_theme_module():
 
     theme = _load()
     assert config.DEFAULTS["theme"] == theme.DEFAULT_THEME
+
+
+def test_accent_variants_share_true_black_surfaces():
+    theme = _load()
+    for key in ("pitch-blue", "pitch-violet", "pitch-crimson", "pitch-amber"):
+        t = theme.THEMES[key]
+        assert t.scheme == "force-dark", key
+        assert "@define-color window_bg_color #000000;" in t.css, key
+    # each variant has a distinct accent
+    accents = set()
+    for key, t in theme.THEMES.items():
+        for line in t.css.splitlines():
+            if line.startswith("@define-color accent_bg_color"):
+                accents.add(line)
+    assert len(accents) >= 5
+
+
+def test_snow_is_light_with_recolored_accent():
+    theme = _load()
+    t = theme.THEMES["snow"]
+    assert t.scheme == "force-light"
+    assert "accent_bg_color #2563eb" in t.css
+    assert "window_bg_color" not in t.css  # stock light surfaces

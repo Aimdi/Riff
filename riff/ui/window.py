@@ -434,15 +434,17 @@ class MainWindow(Adw.ApplicationWindow):
 
         def work():
             tree = self.library.playlist_tree()
-            covers: dict[int, str] = {}
+            covers: dict[int, list] = {}
+            # Up to 8 thumbnails per playlist: set_urls dedupes and builds a
+            # 2x2 collage when 4 distinct covers exist (Snowify-style).
             for item in tree:
                 if item["kind"] == "playlist":
                     tracks = self.library.playlist_tracks(item["id"])
-                    covers[item["id"]] = tracks[0].thumbnail if tracks else ""
+                    covers[item["id"]] = [t.thumbnail for t in tracks[:8]]
                 else:
                     for pid, _n, _c in item["playlists"]:
                         tracks = self.library.playlist_tracks(pid)
-                        covers[pid] = tracks[0].thumbnail if tracks else ""
+                        covers[pid] = [t.thumbnail for t in tracks[:8]]
             try:
                 remote = self.api.library_playlists()
             except Exception:  # noqa: BLE001 — sidebar must never fail hard
@@ -460,7 +462,7 @@ class MainWindow(Adw.ApplicationWindow):
                     plural = "song" if count == 1 else "songs"
                     self._add_playlist_row(
                         name, f"{count} {plural} · local", "local",
-                        (pid, name), covers.get(pid, ""), indent=0)
+                        (pid, name), covers.get(pid) or [], indent=0)
             for pl in remote:
                 self._add_playlist_row(
                     pl.title, pl.author or "YouTube Music", "remote",
@@ -468,10 +470,8 @@ class MainWindow(Adw.ApplicationWindow):
 
         run_async(work, present, lambda _e: None, name="riff-sidebar-pl")
 
-    def _add_folder_row(self, item: dict, covers: dict[int, str]) -> None:
+    def _add_folder_row(self, item: dict, covers: dict[int, list]) -> None:
         from gi.repository import Pango
-
-        from .widgets import CoverArt
 
         from .folder_badge import FolderBadge
 
@@ -507,7 +507,7 @@ class MainWindow(Adw.ApplicationWindow):
                     ppl = "song" if count == 1 else "songs"
                     self._add_playlist_row(
                         pname, f"{count} {ppl} · local", "local",
-                        (pid, pname), covers.get(pid, ""), indent=0)
+                        (pid, pname), covers.get(pid) or [], indent=0)
             return
 
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
@@ -545,10 +545,17 @@ class MainWindow(Adw.ApplicationWindow):
                 ppl = "song" if count == 1 else "songs"
                 self._add_playlist_row(
                     pname, f"{count} {ppl} · local", "local",
-                    (pid, pname), covers.get(pid, ""), indent=1)
+                    (pid, pname), covers.get(pid) or [], indent=1)
+
+    @staticmethod
+    def _set_row_cover(art, cover) -> None:
+        if isinstance(cover, (list, tuple)):
+            art.set_urls(list(cover))
+        else:
+            art.set_url(cover or "")
 
     def _add_playlist_row(self, title: str, subtitle: str,
-                          kind: str, ref, cover: str = "",
+                          kind: str, ref, cover="",
                           indent: int = 0) -> None:
         from gi.repository import Pango
 
@@ -571,7 +578,7 @@ class MainWindow(Adw.ApplicationWindow):
 
         if self._sidebar_collapsed:
             art = CoverArt(52, icon="view-list-symbolic")
-            art.set_url(cover)
+            self._set_row_cover(art, cover)
             art.set_margin_top(4)
             art.set_margin_bottom(4)
             art.set_halign(Gtk.Align.CENTER)
@@ -585,7 +592,7 @@ class MainWindow(Adw.ApplicationWindow):
         box.set_margin_bottom(4)
         box.set_margin_start(6 + (18 * indent))
         art = CoverArt(38, icon="view-list-symbolic")
-        art.set_url(cover)
+        self._set_row_cover(art, cover)
         art.set_valign(Gtk.Align.CENTER)
         box.append(art)
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
