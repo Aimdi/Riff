@@ -1,10 +1,11 @@
-## Riff 0.8.2 🎵
+## Riff 0.9.0 🎵
 
-Icons no longer go blank on elementary / Breeze: Riff loads its own symbolic SVGs for the sidebar, playlist **Queue**/**Add**, transport controls, and more. Playlist **Queue** uses the same ordered-list icon as the player bar.
+**Local AI Mix** — Settings → AI Mix → Provider: **Local (recommended)**. One Install button downloads Ollama (if needed) and Riff’s chosen model, **Qwen 2.5 3B** (~2 GB): small, private, no API key. Cloud Claude / OpenAI-compatible options remain.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
 - Stream songs, albums, artists and playlists from YouTube Music — no ads, no account
+- **Local AI** for AI Mix — install with one click, fully offline after download
 - **Add** button on public playlists — one click to copy them into your local library
 - Icons that stay visible on CachyOS / elementary / Breeze dark themes
 - Radio autoplay: when the queue runs out, related songs keep playing

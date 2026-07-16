@@ -153,7 +153,8 @@ def suggest_songs_openai(base_url: str, api_key: str, model: str,
     def post(payload: dict) -> dict:
         req = urllib.request.Request(
             url, data=json.dumps(payload).encode(), headers=headers)
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        # Local 3B models on CPU can take a few minutes for a full mix.
+        with urllib.request.urlopen(req, timeout=300) as resp:
             return json.load(resp)
 
     try:

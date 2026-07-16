@@ -1,4 +1,4 @@
-"""Settings dialog: playback quality, radio, account status, AI Mix key."""
+"""Settings dialog: playback quality, radio, account status, AI Mix."""
 
 from __future__ import annotations
 
@@ -7,11 +7,21 @@ import os
 from gi.repository import Adw, Gtk
 
 from .. import config
+from ..core import local_ai
 from ..core.api import AUTH_PATH
+from ..util import run_async
 from . import theme
 
 _QUALITIES = ["high", "medium", "low"]
 _QUALITY_LABELS = ["High (best available)", "Medium (~160 kbps)", "Low (~96 kbps)"]
+
+# Provider combo indices — keep in sync with _on_provider / _provider_index.
+_PROVIDERS = ("local", "anthropic", "openai")
+_PROVIDER_LABELS = (
+    "Local (recommended)",
+    "Anthropic (Claude)",
+    "OpenAI-compatible",
+)
 
 
 class SettingsDialog(Adw.PreferencesDialog):
@@ -19,6 +29,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         super().__init__()
         self.window = window
         self.set_title("Settings")
+        self._installing = False
 
         page = Adw.PreferencesPage()
         page.set_title("General")
@@ -111,16 +122,17 @@ class SettingsDialog(Adw.PreferencesDialog):
         ai.set_description(
             "Optional: “AI Mix” in the menu asks an AI model to curate a "
             "queue from your history and favorites. Only song titles and "
-            "artists are sent; keys are stored locally in settings.json.")
+            "artists leave your machine (cloud providers) — Local keeps "
+            "everything private.")
 
         provider = Adw.ComboRow()
         provider.set_title("Provider")
-        provider.set_model(Gtk.StringList.new(
-            ["Anthropic (Claude)", "OpenAI-compatible"]))
-        provider.set_selected(
-            1 if config.settings.get("ai_provider") == "openai" else 0)
+        provider.set_model(Gtk.StringList.new(list(_PROVIDER_LABELS)))
+        provider.set_selected(self._provider_index(
+            str(config.settings.get("ai_provider", "anthropic"))))
         provider.connect("notify::selected", self._on_provider)
         ai.add(provider)
+        self._provider_row = provider
 
         auto = Adw.SwitchRow()
         auto.set_title("Refresh AI Mix daily")
@@ -131,6 +143,32 @@ class SettingsDialog(Adw.PreferencesDialog):
         auto.connect("notify::active", lambda row, _p: config.settings.set(
             "ai_mix_auto_refresh", bool(row.get_active())))
         ai.add(auto)
+        page.add(ai)
+
+        # -- Local model (Riff-managed) ----------------------------------------
+        self.local_group = Adw.PreferencesGroup()
+        self.local_group.set_title("Local model")
+        self.local_group.set_description(
+            f"Riff uses {local_ai.MODEL_LABEL} via Ollama — "
+            f"{local_ai.MODEL_WHY}")
+
+        self.local_status_row = Adw.ActionRow()
+        self.local_status_row.set_title(local_ai.MODEL_LABEL)
+        self.local_status_row.set_subtitle("Checking…")
+        self.local_install_btn = Gtk.Button(label="Install")
+        self.local_install_btn.add_css_class("pill")
+        self.local_install_btn.add_css_class("suggested-action")
+        self.local_install_btn.set_valign(Gtk.Align.CENTER)
+        self.local_install_btn.connect("clicked", self._on_install_local)
+        self.local_status_row.add_suffix(self.local_install_btn)
+        self.local_group.add(self.local_status_row)
+        page.add(self.local_group)
+
+        # -- Anthropic key -----------------------------------------------------
+        self.anthropic_group = Adw.PreferencesGroup()
+        self.anthropic_group.set_title("Anthropic")
+        self.anthropic_group.set_description(
+            "Used when the provider is “Anthropic (Claude)”.")
 
         self.key_row = Adw.PasswordEntryRow()
         self.key_row.set_title("Anthropic API key")
@@ -138,16 +176,15 @@ class SettingsDialog(Adw.PreferencesDialog):
             str(config.settings.get("anthropic_api_key", "") or ""))
         self.key_row.set_show_apply_button(True)
         self.key_row.connect("apply", self._on_key_apply)
-        ai.add(self.key_row)
-        page.add(ai)
+        self.anthropic_group.add(self.key_row)
+        page.add(self.anthropic_group)
 
         # -- OpenAI-compatible endpoint ---------------------------------------
-        openai = Adw.PreferencesGroup()
-        openai.set_title("OpenAI-compatible endpoint")
-        openai.set_description(
-            "Used when the provider above is “OpenAI-compatible”. Works with "
-            "OpenAI, OpenRouter, Groq, and local servers like Ollama "
-            "(http://localhost:11434/v1, key can stay empty) or LM Studio.")
+        self.openai_group = Adw.PreferencesGroup()
+        self.openai_group.set_title("OpenAI-compatible endpoint")
+        self.openai_group.set_description(
+            "Used when the provider is “OpenAI-compatible”. Works with "
+            "OpenAI, OpenRouter, Groq, and hand-rolled local servers.")
 
         self.base_row = Adw.EntryRow()
         self.base_row.set_title("Base URL")
@@ -156,7 +193,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.base_row.set_show_apply_button(True)
         self.base_row.connect(
             "apply", lambda row: self._save("openai_base_url", row.get_text()))
-        openai.add(self.base_row)
+        self.openai_group.add(self.base_row)
 
         self.openai_key_row = Adw.PasswordEntryRow()
         self.openai_key_row.set_title("API key (optional for local servers)")
@@ -165,7 +202,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.openai_key_row.set_show_apply_button(True)
         self.openai_key_row.connect(
             "apply", lambda row: self._save("openai_api_key", row.get_text()))
-        openai.add(self.openai_key_row)
+        self.openai_group.add(self.openai_key_row)
 
         self.model_row = Adw.EntryRow()
         self.model_row.set_title("Model (e.g. gpt-4o-mini, llama3)")
@@ -174,10 +211,59 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.model_row.set_show_apply_button(True)
         self.model_row.connect(
             "apply", lambda row: self._save("openai_model", row.get_text()))
-        openai.add(self.model_row)
-        page.add(openai)
+        self.openai_group.add(self.model_row)
+        page.add(self.openai_group)
 
         self.add(page)
+        self._refresh_provider_visibility()
+        self._refresh_local_status()
+
+    # -- helpers ---------------------------------------------------------------
+
+    @staticmethod
+    def _provider_index(key: str) -> int:
+        try:
+            return _PROVIDERS.index(key)
+        except ValueError:
+            return 1  # anthropic
+
+    def _current_provider(self) -> str:
+        idx = int(self._provider_row.get_selected())
+        if 0 <= idx < len(_PROVIDERS):
+            return _PROVIDERS[idx]
+        return "anthropic"
+
+    def _refresh_provider_visibility(self) -> None:
+        provider = self._current_provider()
+        self.local_group.set_visible(provider == "local")
+        self.anthropic_group.set_visible(provider == "anthropic")
+        self.openai_group.set_visible(provider == "openai")
+
+    def _refresh_local_status(self) -> None:
+        """Query Ollama on a worker thread and update the row."""
+        if self._installing:
+            return
+
+        def work():
+            return local_ai.status()
+
+        def done(st: local_ai.LocalAiStatus) -> None:
+            self.local_status_row.set_subtitle(st.detail)
+            if st.ready:
+                self.local_install_btn.set_label("Ready")
+                self.local_install_btn.set_sensitive(False)
+                self.local_install_btn.remove_css_class("suggested-action")
+            else:
+                label = "Install"
+                if st.ollama_bin and st.server_up and not st.model_ready:
+                    label = f"Download model ({local_ai.MODEL_SIZE_HINT})"
+                elif st.ollama_bin and not st.server_up:
+                    label = "Start & download"
+                self.local_install_btn.set_label(label)
+                self.local_install_btn.set_sensitive(True)
+                self.local_install_btn.add_css_class("suggested-action")
+
+        run_async(work, done, lambda _e: None, name="riff-local-ai-status")
 
     def _save(self, key: str, value: str) -> None:
         config.settings.set(key, value.strip())
@@ -189,13 +275,21 @@ class SettingsDialog(Adw.PreferencesDialog):
         theme.apply(key)
 
     def _on_provider(self, row: Adw.ComboRow, _pspec) -> None:
-        config.settings.set(
-            "ai_provider", "openai" if row.get_selected() == 1 else "anthropic")
+        provider = _PROVIDERS[row.get_selected()]
+        config.settings.set("ai_provider", provider)
+        if provider == "local":
+            # Point OpenAI-compat fields at Ollama so a later switch to
+            # "OpenAI-compatible" still works if the user wants to tweak.
+            local_ai.apply_local_settings()
+            # apply_local_settings sets provider again; keep combo in sync
+            config.settings.set("ai_provider", "local")
+        self._refresh_provider_visibility()
+        if provider == "local":
+            self._refresh_local_status()
 
     def _on_quality(self, row: Adw.ComboRow, _pspec) -> None:
         value = _QUALITIES[row.get_selected()]
         config.settings.set("audio_quality", value)
-        # take effect immediately for the next resolved stream
         self.window.service.resolver.quality = value
 
     def _on_radio(self, row: Adw.SwitchRow, _pspec) -> None:
@@ -204,3 +298,61 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _on_key_apply(self, row: Adw.PasswordEntryRow) -> None:
         config.settings.set("anthropic_api_key", row.get_text().strip())
         self.window.toast("API key saved")
+
+    def _on_install_local(self, _btn) -> None:
+        if self._installing:
+            return
+        self._installing = True
+        self.local_install_btn.set_sensitive(False)
+        self.local_install_btn.set_label("Working…")
+        self.local_status_row.set_subtitle("Starting install…")
+
+        dialog = Adw.Dialog.new()
+        dialog.set_title("Install local AI")
+        dialog.set_content_width(400)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.append(Adw.HeaderBar())
+        spinner = Gtk.Spinner()
+        spinner.set_size_request(32, 32)
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.start()
+        box.append(spinner)
+        status = Gtk.Label(label="Preparing…")
+        status.set_wrap(True)
+        status.set_margin_start(20)
+        status.set_margin_end(20)
+        status.set_margin_bottom(24)
+        box.append(status)
+        dialog.set_child(box)
+        dialog.present(self)
+
+        def progress(msg: str) -> None:
+            from gi.repository import GLib
+            GLib.idle_add(lambda: (status.set_label(msg), False)[1])
+
+        def work():
+            return local_ai.install_local_ai(progress=progress)
+
+        def done(st: local_ai.LocalAiStatus) -> None:
+            self._installing = False
+            local_ai.apply_local_settings()
+            config.settings.set("ai_provider", "local")
+            # keep combo on Local
+            self._provider_row.set_selected(self._provider_index("local"))
+            spinner.stop()
+            dialog.close()
+            self._refresh_local_status()
+            self.window.toast(
+                f"{local_ai.MODEL_LABEL} ready — AI Mix can use it offline")
+
+        def fail(exc: Exception) -> None:
+            self._installing = False
+            spinner.stop()
+            spinner.set_visible(False)
+            status.set_label(f"Install failed:\n{exc}")
+            status.add_css_class("error")
+            self.local_install_btn.set_sensitive(True)
+            self.local_install_btn.set_label("Retry")
+            self.local_status_row.set_subtitle(str(exc))
+
+        run_async(work, done, fail, name="riff-local-ai-install")

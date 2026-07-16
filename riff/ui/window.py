@@ -820,7 +820,30 @@ class MainWindow(Adw.ApplicationWindow):
         SettingsDialog(self).present(self)
 
     def _ai_provider_config(self, interactive: bool) -> dict | None:
+        from ..core import local_ai
+
         provider = str(config.settings.get("ai_provider", "anthropic"))
+        if provider == "local":
+            st = local_ai.status()
+            if not st.ready:
+                if interactive:
+                    self.toast(
+                        "Install the local model in Settings → AI Mix first")
+                    self.show_settings()
+                return None
+            # Ensure the daemon is up (cheap if already running).
+            try:
+                local_ai.ensure_server()
+            except Exception as exc:  # noqa: BLE001
+                if interactive:
+                    self.toast(f"Couldn't start local AI: {exc}")
+                return None
+            return {
+                "provider": "openai",  # same chat-completions path
+                "base_url": local_ai.OPENAI_COMPAT_BASE,
+                "key": "",
+                "model": local_ai.MODEL_ID,
+            }
         if provider == "openai":
             model = str(config.settings.get("openai_model", "") or "")
             if not model:
