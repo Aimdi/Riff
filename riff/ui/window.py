@@ -474,16 +474,20 @@ class MainWindow(Adw.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.kind = "folder"
         row.ref = fid
+        row.folder_meta = {
+            "id": fid, "name": name, "color": fcolor, "emoji": femoji,
+        }
         self._install_folder_drop(row, fid)
+        self._install_folder_context_menu(row, fid, name, fcolor, femoji)
 
         if self._sidebar_collapsed:
-            badge = FolderBadge(fcolor, femoji, size=40)
+            badge = FolderBadge(fcolor, femoji, size=42)
             badge.set_margin_top(6)
             badge.set_margin_bottom(6)
             badge.set_halign(Gtk.Align.CENTER)
             row.set_child(badge)
             row.set_tooltip_text(
-                f"{name}\n{n} {plural}\nDrop playlists here")
+                f"{name}\n{n} {plural}\nRight-click for options · drop playlists")
             self.playlist_list.append(row)
             if expanded:
                 for pid, pname, count in children:
@@ -493,7 +497,7 @@ class MainWindow(Adw.ApplicationWindow):
                         (pid, pname), covers.get(pid, ""), indent=0)
             return
 
-        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         box.set_margin_top(4)
         box.set_margin_bottom(4)
         box.set_margin_start(6)
@@ -501,7 +505,7 @@ class MainWindow(Adw.ApplicationWindow):
         chevron.add_css_class("dim-label")
         chevron.set_width_chars(1)
         box.append(chevron)
-        icon = FolderBadge(fcolor, femoji, size=22)
+        icon = FolderBadge(fcolor, femoji, size=28)
         icon.set_valign(Gtk.Align.CENTER)
         box.append(icon)
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
@@ -511,7 +515,7 @@ class MainWindow(Adw.ApplicationWindow):
         t.set_xalign(0.0)
         t.set_ellipsize(Pango.EllipsizeMode.END)
         t.add_css_class("heading")
-        s = Gtk.Label(label=f"{n} {plural} · drop playlists here")
+        s = Gtk.Label(label=f"{n} {plural}")
         s.set_xalign(0.0)
         s.add_css_class("dim-label")
         s.add_css_class("caption")
@@ -519,7 +523,8 @@ class MainWindow(Adw.ApplicationWindow):
         text_box.append(s)
         box.append(text_box)
         row.set_child(box)
-        row.set_tooltip_text("Click to expand · drag playlists onto this folder")
+        row.set_tooltip_text(
+            "Click to expand · right-click for options · drag playlists here")
         self.playlist_list.append(row)
 
         if expanded:
@@ -597,6 +602,82 @@ class MainWindow(Adw.ApplicationWindow):
             lambda _s, _x, _y, pid=playlist_id:
                 Gdk.ContentProvider.new_for_value(f"playlist:{pid}"))
         row.add_controller(source)
+
+    def _install_folder_context_menu(
+            self, widget: Gtk.Widget, folder_id: int, name: str,
+            color: str, emoji: str) -> None:
+        """Right-click (or long-press) menu on a folder row."""
+        gesture = Gtk.GestureClick()
+        gesture.set_button(3)
+
+        def on_press(_g, _n, x, y) -> None:
+            self.show_folder_menu(
+                widget, folder_id, name, color, emoji, x=x, y=y)
+
+        gesture.connect("pressed", on_press)
+        widget.add_controller(gesture)
+
+        # Long-press for touchpads / touch screens.
+        long_press = Gtk.GestureLongPress()
+        long_press.connect(
+            "pressed",
+            lambda _g, x, y: self.show_folder_menu(
+                widget, folder_id, name, color, emoji, x=x, y=y))
+        widget.add_controller(long_press)
+
+    def show_folder_menu(self, parent: Gtk.Widget, folder_id: int,
+                         name: str, color: str, emoji: str,
+                         x: float = 0, y: float = 0) -> None:
+        """Popover: style, rename, delete."""
+        pop = Gtk.Popover()
+        pop.set_has_arrow(True)
+        pop.set_autohide(True)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        box.set_margin_top(6)
+        box.set_margin_bottom(6)
+        box.set_margin_start(6)
+        box.set_margin_end(6)
+
+        head = Gtk.Label(label=name)
+        head.add_css_class("heading")
+        head.set_margin_bottom(4)
+        box.append(head)
+
+        def item(label: str, cb) -> None:
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("flat")
+            btn.set_halign(Gtk.Align.FILL)
+            btn.connect("clicked", lambda *_: (cb(), pop.popdown()))
+            box.append(btn)
+
+        item("Change color & emoji…",
+             lambda: self.choose_folder_style(folder_id, color, emoji))
+        item("Rename…", lambda: self.prompt_text(
+            "Rename Folder", "New name",
+            lambda n: (self.library.rename_folder(folder_id, n),
+                       self.reload_sidebar_playlists(),
+                       self.pages["playlists"].refresh(),
+                       self.toast(f'Renamed to "{n}"')),
+            accept_label="Rename"))
+        item("Delete folder", lambda: (
+            self.library.delete_folder(folder_id),
+            self.reload_sidebar_playlists(),
+            self.pages["playlists"].refresh(),
+            self.toast("Folder deleted — playlists kept")))
+
+        pop.set_child(box)
+        pop.set_parent(parent)
+        # Point the popover at the click location when possible.
+        try:
+            rect = Gdk.Rectangle()
+            rect.x = int(x)
+            rect.y = int(y)
+            rect.width = 1
+            rect.height = 1
+            pop.set_pointing_to(rect)
+        except Exception:  # noqa: BLE001
+            pass
+        pop.popup()
 
     def _install_folder_drop(self, row: Gtk.ListBoxRow, folder_id: int) -> None:
         target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)

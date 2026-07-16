@@ -882,18 +882,24 @@ class PlaylistsPage(ContentPage):
         femoji = item.get("emoji") or "🎵"
         icon_btn = Gtk.Button()
         icon_btn.add_css_class("flat")
-        icon_btn.set_tooltip_text("Change color & emoji")
-        icon_btn.set_child(FolderBadge(fcolor, femoji, size=28))
+        icon_btn.set_tooltip_text("Change color & emoji · right-click for menu")
+        icon_btn.set_child(FolderBadge(fcolor, femoji, size=36))
         icon_btn.connect(
             "clicked",
             lambda *_: self.window.choose_folder_style(
                 item["id"], fcolor, femoji))
+        # Right-click menu on the badge / header area
+        self.window._install_folder_context_menu(
+            icon_btn, item["id"], item["name"], fcolor, femoji)
         header.append(icon_btn)
         title = Gtk.Label(label=item["name"])
         title.add_css_class("title-3")
         title.set_xalign(0.0)
         title.set_hexpand(True)
+        title.set_selectable(False)
         header.append(title)
+        self.window._install_folder_context_menu(
+            header, item["id"], item["name"], fcolor, femoji)
         rename = Gtk.Button()
         iconutil.set_button(rename, "document-edit-symbolic")
         rename.add_css_class("flat")
