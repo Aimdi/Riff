@@ -32,6 +32,24 @@ def test_parse_suggestions():
     assert songs == [("Old Man", "Neil Young"), ("Rhiannon", "Fleetwood Mac")]
 
 
+def test_extract_json_plain():
+    from riff.core.ai import extract_json
+    assert extract_json('{"songs": []}') == '{"songs": []}'
+
+
+def test_extract_json_fenced_and_wrapped():
+    from riff.core.ai import extract_json
+    fenced = '```json\n{"songs": [{"title": "A", "artist": "B"}]}\n```'
+    assert extract_json(fenced) == '{"songs": [{"title": "A", "artist": "B"}]}'
+    wrapped = 'Here you go:\n{"songs": []}\nEnjoy!'
+    assert extract_json(wrapped) == '{"songs": []}'
+
+
+def test_parse_suggestions_fenced():
+    text = '```json\n{"songs": [{"title": "Old Man", "artist": "Neil Young"}]}\n```'
+    assert parse_suggestions(text) == [("Old Man", "Neil Young")]
+
+
 def test_parse_suggestions_bad_json():
     with pytest.raises(ValueError):
         parse_suggestions("not json")

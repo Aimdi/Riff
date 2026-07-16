@@ -66,10 +66,18 @@ class SettingsDialog(Adw.PreferencesDialog):
         ai = Adw.PreferencesGroup()
         ai.set_title("AI Mix")
         ai.set_description(
-            "Optional: with an Anthropic API key, “AI Mix” in the menu asks "
-            "Claude to curate a queue from your history and favorites. Only "
-            "song titles and artists are sent; the key is stored locally in "
-            "settings.json.")
+            "Optional: “AI Mix” in the menu asks an AI model to curate a "
+            "queue from your history and favorites. Only song titles and "
+            "artists are sent; keys are stored locally in settings.json.")
+
+        provider = Adw.ComboRow()
+        provider.set_title("Provider")
+        provider.set_model(Gtk.StringList.new(
+            ["Anthropic (Claude)", "OpenAI-compatible"]))
+        provider.set_selected(
+            1 if config.settings.get("ai_provider") == "openai" else 0)
+        provider.connect("notify::selected", self._on_provider)
+        ai.add(provider)
 
         self.key_row = Adw.PasswordEntryRow()
         self.key_row.set_title("Anthropic API key")
@@ -80,7 +88,51 @@ class SettingsDialog(Adw.PreferencesDialog):
         ai.add(self.key_row)
         page.add(ai)
 
+        # -- OpenAI-compatible endpoint ---------------------------------------
+        openai = Adw.PreferencesGroup()
+        openai.set_title("OpenAI-compatible endpoint")
+        openai.set_description(
+            "Used when the provider above is “OpenAI-compatible”. Works with "
+            "OpenAI, OpenRouter, Groq, and local servers like Ollama "
+            "(http://localhost:11434/v1, key can stay empty) or LM Studio.")
+
+        self.base_row = Adw.EntryRow()
+        self.base_row.set_title("Base URL")
+        self.base_row.set_text(str(config.settings.get(
+            "openai_base_url", "https://api.openai.com/v1") or ""))
+        self.base_row.set_show_apply_button(True)
+        self.base_row.connect(
+            "apply", lambda row: self._save("openai_base_url", row.get_text()))
+        openai.add(self.base_row)
+
+        self.openai_key_row = Adw.PasswordEntryRow()
+        self.openai_key_row.set_title("API key (optional for local servers)")
+        self.openai_key_row.set_text(
+            str(config.settings.get("openai_api_key", "") or ""))
+        self.openai_key_row.set_show_apply_button(True)
+        self.openai_key_row.connect(
+            "apply", lambda row: self._save("openai_api_key", row.get_text()))
+        openai.add(self.openai_key_row)
+
+        self.model_row = Adw.EntryRow()
+        self.model_row.set_title("Model (e.g. gpt-4o-mini, llama3)")
+        self.model_row.set_text(
+            str(config.settings.get("openai_model", "") or ""))
+        self.model_row.set_show_apply_button(True)
+        self.model_row.connect(
+            "apply", lambda row: self._save("openai_model", row.get_text()))
+        openai.add(self.model_row)
+        page.add(openai)
+
         self.add(page)
+
+    def _save(self, key: str, value: str) -> None:
+        config.settings.set(key, value.strip())
+        self.window.toast("Saved")
+
+    def _on_provider(self, row: Adw.ComboRow, _pspec) -> None:
+        config.settings.set(
+            "ai_provider", "openai" if row.get_selected() == 1 else "anthropic")
 
     def _on_quality(self, row: Adw.ComboRow, _pspec) -> None:
         value = _QUALITIES[row.get_selected()]

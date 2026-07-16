@@ -94,13 +94,19 @@ API key. Stored in `~/.config/riff/settings.json`.
 
 ### AI Mix (optional)
 
-With an [Anthropic API key](https://platform.claude.com/) saved in Settings,
-the header menu's **AI Mix** asks Claude (Opus 4.8) to curate ~20 songs from
-your listening history and favorites, finds them on YouTube Music, and queues
-them. Only song titles/artists are sent to the API; the key is stored locally
-and requests are billed to your own Anthropic account. Requires the
-`anthropic` Python package (`paru -S python-anthropic` or
-`pip install --user anthropic`).
+The header menu's **AI Mix** asks an AI model to curate ~20 songs from your
+listening history and favorites, finds them on YouTube Music, and queues
+them. Only song titles/artists are sent; keys are stored locally. Two
+provider options in Settings:
+
+- **Anthropic (Claude)** — paste an [Anthropic API key](https://platform.claude.com/);
+  uses Claude Opus 4.8. Requires the `anthropic` Python package
+  (`paru -S python-anthropic` or `pip install --user anthropic`).
+- **OpenAI-compatible** — any endpoint speaking the `/chat/completions`
+  protocol; set base URL, key, and model. Examples: OpenAI
+  (`https://api.openai.com/v1`, `gpt-4o-mini`), OpenRouter, Groq, or fully
+  local via Ollama (`http://localhost:11434/v1`, key empty, model e.g.
+  `llama3`) or LM Studio. No extra package needed.
 
 ### Improving recommendations & audio quality
 

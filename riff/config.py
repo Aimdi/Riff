@@ -29,7 +29,11 @@ DEFAULTS = {
     "audio_quality": "high",  # "high" | "medium" | "low"
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
+    "ai_provider": "anthropic",  # "anthropic" | "openai"
     "anthropic_api_key": "",
+    "openai_base_url": "https://api.openai.com/v1",
+    "openai_api_key": "",
+    "openai_model": "",
     "window_width": 1100,
     "window_height": 720,
 }

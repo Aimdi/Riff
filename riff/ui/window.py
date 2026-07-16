@@ -507,11 +507,21 @@ class MainWindow(Adw.ApplicationWindow):
     def start_ai_mix(self) -> None:
         from ..core import ai
 
-        key = str(config.settings.get("anthropic_api_key", "") or "")
-        if not key:
-            self.toast("Add your Anthropic API key in Settings to use AI Mix")
-            self.show_settings()
-            return
+        provider = str(config.settings.get("ai_provider", "anthropic"))
+        if provider == "openai":
+            base_url = str(config.settings.get("openai_base_url", "") or "")
+            openai_key = str(config.settings.get("openai_api_key", "") or "")
+            model = str(config.settings.get("openai_model", "") or "")
+            if not model:
+                self.toast("Set the model name in Settings to use AI Mix")
+                self.show_settings()
+                return
+        else:
+            key = str(config.settings.get("anthropic_api_key", "") or "")
+            if not key:
+                self.toast("Add your Anthropic API key in Settings to use AI Mix")
+                self.show_settings()
+                return
 
         def work():
             recent = self.library.recent(30)
@@ -519,7 +529,11 @@ class MainWindow(Adw.ApplicationWindow):
             if not recent and not favorites:
                 raise RuntimeError(
                     "Play or favorite some songs first — AI Mix learns from them")
-            suggestions = ai.suggest_songs(key, recent, favorites)
+            if provider == "openai":
+                suggestions = ai.suggest_songs_openai(
+                    base_url, openai_key, model, recent, favorites)
+            else:
+                suggestions = ai.suggest_songs(key, recent, favorites)
             known = {t.video_id for t in recent}
             tracks, seen = [], set()
             for title, artist in suggestions:

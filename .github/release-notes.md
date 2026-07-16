@@ -1,6 +1,6 @@
-## Riff 0.3.0 🎵
+## Riff 0.3.1 🎵
 
-Adds a Settings dialog (header menu → Settings): audio quality (high/medium/low, applied live), radio autoplay toggle, YouTube Music account status, and an optional Anthropic API key. With a key saved, the new **AI Mix** menu action has Claude (Opus 4.8) curate ~20 songs from your listening history and favorites, resolves them on YouTube Music, and queues them — only titles/artists are sent, the key stays local. Requires the python-anthropic package (optional).
+AI Mix now supports **OpenAI-compatible endpoints** alongside Anthropic: pick the provider in Settings and point it at OpenAI, OpenRouter, Groq, or a fully local server (Ollama at http://localhost:11434/v1 with an empty key, LM Studio, …) with your own base URL, key, and model. Implemented over plain HTTP — no extra package required; tolerates servers without JSON response-format support.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
