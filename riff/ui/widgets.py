@@ -5,7 +5,7 @@ from __future__ import annotations
 from gi.repository import Gio, Gtk, Pango
 
 from ..core.models import Album, Artist, Playlist, Track
-from . import images
+from . import iconutil, images
 
 
 class CoverArt(Gtk.Frame):
@@ -26,8 +26,7 @@ class CoverArt(Gtk.Frame):
             self._picture.set_content_fit(Gtk.ContentFit.COVER)
         except AttributeError:
             pass
-        self._placeholder = Gtk.Image.new_from_icon_name(icon)
-        self._placeholder.set_pixel_size(max(16, size // 3))
+        self._placeholder = iconutil.image(icon, size=max(16, size // 3))
         self._placeholder.add_css_class("dim-label")
         self.set_child(self._placeholder)
 

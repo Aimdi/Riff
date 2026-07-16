@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from gi.repository import Gdk, GObject, Gtk, Pango
 
+from . import iconutil
 from .widgets import CoverArt, build_track_menu, menu_dots_button
 
 
@@ -22,7 +23,8 @@ class QueuePanel(Gtk.Box):
         title.set_hexpand(True)
         title.set_xalign(0.0)
         header.append(title)
-        clear = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        clear = Gtk.Button()
+        iconutil.set_button(clear, "user-trash-symbolic")
         clear.add_css_class("flat")
         clear.set_tooltip_text("Clear queue")
         clear.connect("clicked", self._on_clear)
@@ -57,8 +59,7 @@ class QueuePanel(Gtk.Box):
             box.set_margin_end(6)
 
             if i == current:
-                icon = Gtk.Image.new_from_icon_name(
-                    "media-playback-start-symbolic")
+                icon = iconutil.image("media-playback-start-symbolic")
                 icon.add_css_class("accent")
                 box.append(icon)
             else:
@@ -95,7 +96,8 @@ class QueuePanel(Gtk.Box):
             row.insert_action_group("trk", group)
             box.append(menu_btn)
 
-            remove = Gtk.Button.new_from_icon_name("window-close-symbolic")
+            remove = Gtk.Button()
+            iconutil.set_button(remove, "window-close-symbolic")
             remove.add_css_class("flat")
             remove.set_valign(Gtk.Align.CENTER)
             remove.set_tooltip_text("Remove from queue")

@@ -11,6 +11,7 @@ log = logging.getLogger("riff.pages")
 
 from ..core.models import Album, Artist, Playlist, Track
 from ..util import run_async
+from . import iconutil
 from .widgets import (
     CardGrid,
     Carousel,
@@ -375,7 +376,8 @@ class _DetailPage(ContentPage):
         buttons.append(shuffle)
 
         queue = Gtk.Button()
-        queue.set_child(_button_content("list-add-symbolic", "Queue"))
+        # Match the player-bar queue icon; list-add is reserved for "Add".
+        queue.set_child(_button_content("view-list-ordered-symbolic", "Queue"))
         queue.add_css_class("pill")
         queue.connect("clicked", lambda *_:
                       (self.window.service.add_to_queue(tracks),
@@ -400,7 +402,7 @@ class _DetailPage(ContentPage):
 
 def _button_content(icon: str, label: str) -> Gtk.Box:
     box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-    box.append(Gtk.Image.new_from_icon_name(icon))
+    box.append(iconutil.image(icon))
     box.append(Gtk.Label(label=label))
     return box
 
@@ -723,13 +725,15 @@ class PlaylistsPage(ContentPage):
                 art.set_url(covers.get(pid, ""))
                 art.set_valign(Gtk.Align.CENTER)
                 row.add_prefix(art)
-                rename = Gtk.Button.new_from_icon_name("document-edit-symbolic")
+                rename = Gtk.Button()
+                iconutil.set_button(rename, "document-edit-symbolic")
                 rename.add_css_class("flat")
                 rename.set_valign(Gtk.Align.CENTER)
                 rename.set_tooltip_text("Rename")
                 rename.connect("clicked", self._on_rename, pid)
                 row.add_suffix(rename)
-                delete = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+                delete = Gtk.Button()
+                iconutil.set_button(delete, "user-trash-symbolic")
                 delete.add_css_class("flat")
                 delete.set_valign(Gtk.Align.CENTER)
                 delete.set_tooltip_text("Delete")

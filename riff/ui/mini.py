@@ -9,6 +9,7 @@ from __future__ import annotations
 from gi.repository import Gtk
 
 from ..core.player import STATE_LOADING, STATE_PLAYING
+from . import iconutil
 from .widgets import CoverArt, _ellipsized
 
 
@@ -40,23 +41,26 @@ class MiniPlayer(Gtk.Window):
         middle.append(self.artist_label)
 
         controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=2)
-        prev = Gtk.Button.new_from_icon_name("media-skip-backward-symbolic")
+        prev = Gtk.Button()
+        iconutil.set_button(prev, "media-skip-backward-symbolic")
         prev.add_css_class("flat")
         prev.connect("clicked", lambda *_: self.service.previous())
         controls.append(prev)
-        self.play_btn = Gtk.Button.new_from_icon_name(
-            "media-playback-start-symbolic")
+        self.play_btn = Gtk.Button()
+        iconutil.set_button(self.play_btn, "media-playback-start-symbolic")
         self.play_btn.add_css_class("flat")
         self.play_btn.connect("clicked", lambda *_: self.service.toggle_pause())
         controls.append(self.play_btn)
-        nxt = Gtk.Button.new_from_icon_name("media-skip-forward-symbolic")
+        nxt = Gtk.Button()
+        iconutil.set_button(nxt, "media-skip-forward-symbolic")
         nxt.add_css_class("flat")
         nxt.connect("clicked", lambda *_: self.service.next())
         controls.append(nxt)
         middle.append(controls)
         box.append(middle)
 
-        restore = Gtk.Button.new_from_icon_name("view-restore-symbolic")
+        restore = Gtk.Button()
+        iconutil.set_button(restore, "view-restore-symbolic")
         restore.add_css_class("flat")
         restore.set_valign(Gtk.Align.CENTER)
         restore.set_tooltip_text("Back to full window")
@@ -97,4 +101,4 @@ class MiniPlayer(Gtk.Window):
         icon = ("media-playback-pause-symbolic"
                 if state in (STATE_PLAYING, STATE_LOADING)
                 else "media-playback-start-symbolic")
-        self.play_btn.set_icon_name(icon)
+        iconutil.set_button(self.play_btn, icon)

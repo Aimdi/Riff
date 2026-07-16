@@ -26,6 +26,7 @@ from .pages import (
     SearchPage,
     StatsPage,
 )
+from . import iconutil
 from .player_bar import PlayerBar
 from .queue_panel import QueuePanel
 
@@ -129,7 +130,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("Settings", "win.settings")
         menu.append("About Riff", "win.about")
         menu_btn = Gtk.MenuButton()
-        menu_btn.set_icon_name("open-menu-symbolic")
+        menu_btn.set_child(iconutil.image("open-menu-symbolic"))
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
 
@@ -182,7 +183,8 @@ class MainWindow(Adw.ApplicationWindow):
             box.set_margin_top(8)
             box.set_margin_bottom(8)
             box.set_margin_start(8)
-            box.append(Gtk.Image.new_from_icon_name(icon))
+            # Bundled SVGs — system themes leave some of these blank/invisible.
+            box.append(iconutil.image(icon))
             text = Gtk.Label(label=label)
             box.append(text)
             row.set_child(box)

@@ -66,13 +66,13 @@ class RiffApplication(Adw.Application):
             15, lambda: (self.window.maybe_auto_refresh_ai_mix(), False)[1])
 
     def _register_bundled_icons(self) -> None:
-        """Riff bundles the symbolic icons it uses.
+        """Register bundled SVGs as an icon-theme search path.
 
-        Desktops whose GTK icon theme lacks GNOME icon names (e.g. Breeze on
-        KDE Plasma) would otherwise render blank buttons — the favorite heart
-        and the per-song menu were invisible on stock CachyOS. Icons placed
-        directly on the search path act as a fallback: the active theme still
-        wins when it provides a name.
+        Primary UI widgets load icons via ``riff.ui.iconutil`` (which always
+        prefers the shipped SVG so elementary/Breeze cannot blank them).
+        This path remains so anything still using ``new_from_icon_name`` /
+        ``set_icon_name`` (status pages, ScaleButton volumes, etc.) can still
+        resolve Riff-only names like ``riff-stats-symbolic``.
         """
         import os
 
@@ -86,9 +86,9 @@ class RiffApplication(Adw.Application):
             return
         theme = Gtk.IconTheme.get_for_display(display)
         theme.add_search_path(icons_dir)
-        if not theme.has_icon("emblem-favorite-symbolic"):
+        if not theme.has_icon("riff-stats-symbolic"):
             log.warning(
-                "icon fallback failed: emblem-favorite-symbolic still not "
+                "icon fallback failed: riff-stats-symbolic still not "
                 "resolvable (icon theme: %s)", theme.get_theme_name())
 
     def _install_accels(self) -> None:

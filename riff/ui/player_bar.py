@@ -8,6 +8,7 @@ from .. import config
 from ..core.models import format_duration
 from ..core.player import STATE_LOADING, STATE_PLAYING
 from ..core.queue import REPEAT_ALL, REPEAT_ONE
+from . import iconutil
 from .widgets import (
     CoverArt,
     _ellipsized,
@@ -87,32 +88,34 @@ class PlayerBar(Gtk.Box):
         transport.set_valign(Gtk.Align.CENTER)
 
         self.shuffle_btn = Gtk.ToggleButton()
-        self.shuffle_btn.set_icon_name("media-playlist-shuffle-symbolic")
+        iconutil.set_button(self.shuffle_btn, "media-playlist-shuffle-symbolic")
         self.shuffle_btn.add_css_class("flat")
         self.shuffle_btn.set_tooltip_text("Shuffle")
         self.shuffle_btn.connect("toggled", self._on_shuffle)
         transport.append(self.shuffle_btn)
 
-        prev = Gtk.Button.new_from_icon_name("media-skip-backward-symbolic")
+        prev = Gtk.Button()
+        iconutil.set_button(prev, "media-skip-backward-symbolic")
         prev.add_css_class("flat")
         prev.connect("clicked", lambda *_: self.service.previous())
         transport.append(prev)
 
-        self.play_btn = Gtk.Button.new_from_icon_name(
-            "media-playback-start-symbolic")
+        self.play_btn = Gtk.Button()
+        iconutil.set_button(self.play_btn, "media-playback-start-symbolic")
         self.play_btn.add_css_class("pill")
         self.play_btn.add_css_class("suggested-action")
         self.play_btn.set_size_request(52, 52)
         self.play_btn.connect("clicked", lambda *_: self.service.toggle_pause())
         transport.append(self.play_btn)
 
-        nxt = Gtk.Button.new_from_icon_name("media-skip-forward-symbolic")
+        nxt = Gtk.Button()
+        iconutil.set_button(nxt, "media-skip-forward-symbolic")
         nxt.add_css_class("flat")
         nxt.connect("clicked", lambda *_: self.service.next())
         transport.append(nxt)
 
-        self.repeat_btn = Gtk.Button.new_from_icon_name(
-            "media-playlist-repeat-symbolic")
+        self.repeat_btn = Gtk.Button()
+        iconutil.set_button(self.repeat_btn, "media-playlist-repeat-symbolic")
         self.repeat_btn.add_css_class("flat")
         self.repeat_btn.set_tooltip_text("Repeat: off")
         self.repeat_btn.connect("clicked", self._on_repeat)
@@ -133,7 +136,7 @@ class PlayerBar(Gtk.Box):
         right.append(self.volume)
 
         self.queue_btn = Gtk.ToggleButton()
-        self.queue_btn.set_icon_name("view-list-ordered-symbolic")
+        iconutil.set_button(self.queue_btn, "view-list-ordered-symbolic")
         self.queue_btn.add_css_class("flat")
         self.queue_btn.set_tooltip_text("Show queue")
         right.append(self.queue_btn)
@@ -180,7 +183,7 @@ class PlayerBar(Gtk.Box):
         icon = ("media-playback-pause-symbolic"
                 if state in (STATE_PLAYING, STATE_LOADING)
                 else "media-playback-start-symbolic")
-        self.play_btn.set_icon_name(icon)
+        iconutil.set_button(self.play_btn, icon)
 
     def _on_position(self, pos: float) -> None:
         if self._seeking:
@@ -216,7 +219,8 @@ class PlayerBar(Gtk.Box):
             REPEAT_ONE: "media-playlist-repeat-song-symbolic",
             REPEAT_ALL: "media-playlist-repeat-symbolic",
         }
-        self.repeat_btn.set_icon_name(
+        iconutil.set_button(
+            self.repeat_btn,
             icons.get(mode, "media-playlist-repeat-symbolic"))
         if mode == REPEAT_ALL:
             self.repeat_btn.add_css_class("accent")

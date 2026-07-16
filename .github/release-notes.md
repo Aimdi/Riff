@@ -1,11 +1,12 @@
-## Riff 0.8.1 🎵
+## Riff 0.8.2 🎵
 
-**Add** public playlists to your library: open any YouTube Music playlist and hit **Add** to save a local snapshot of its tracks. It shows up in the sidebar next to your other playlists.
+Icons no longer go blank on elementary / Breeze: Riff loads its own symbolic SVGs for the sidebar, playlist **Queue**/**Add**, transport controls, and more. Playlist **Queue** uses the same ordered-list icon as the player bar.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
 - Stream songs, albums, artists and playlists from YouTube Music — no ads, no account
 - **Add** button on public playlists — one click to copy them into your local library
+- Icons that stay visible on CachyOS / elementary / Breeze dark themes
 - Radio autoplay: when the queue runs out, related songs keep playing
 - Queue with shuffle, repeat (off/all/one), play-next and add-to-queue
 - Favorites, listening history and local playlists (SQLite)
