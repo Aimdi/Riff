@@ -92,10 +92,14 @@ class PlayerBar(Gtk.Box):
         now = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         now.set_vexpand(False)
         now.set_valign(Gtk.Align.CENTER)
-        # Cover + video toggle stacked: click art for album, film for video.
-        art_box = Gtk.Overlay()
-        art_box.set_size_request(52, 52)
-        self.art = CoverArt(52)
+        # Cover art slot — swaps to live video when video mode is on.
+        self._art_size = 52
+        self.art_stack = Gtk.Stack()
+        self.art_stack.set_size_request(self._art_size, self._art_size)
+        self.art_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.art_stack.set_transition_duration(150)
+
+        self.art = CoverArt(self._art_size)
         self.art_btn = Gtk.Button()
         self.art_btn.add_css_class("flat")
         self.art_btn.add_css_class("riff-cover-link")
@@ -105,7 +109,22 @@ class PlayerBar(Gtk.Box):
         self.art_btn.set_child(self.art)
         self.art_btn.set_tooltip_text("Go to album")
         self.art_btn.connect("clicked", self._on_title_clicked)
-        art_box.set_child(self.art_btn)
+        self.art_stack.add_named(self.art_btn, "art")
+
+        self.video_picture = Gtk.Picture()
+        self.video_picture.set_content_fit(Gtk.ContentFit.COVER)
+        self.video_picture.set_size_request(self._art_size, self._art_size)
+        self.video_picture.set_can_shrink(True)
+        try:
+            self.video_picture.set_overflow(Gtk.Overflow.HIDDEN)
+        except AttributeError:
+            pass
+        self.art_stack.add_named(self.video_picture, "video")
+        self.art_stack.set_visible_child_name("art")
+
+        art_box = Gtk.Overlay()
+        art_box.set_size_request(self._art_size, self._art_size)
+        art_box.set_child(self.art_stack)
 
         self.video_btn = Gtk.ToggleButton()
         self.video_btn.add_css_class("circular")
@@ -115,7 +134,7 @@ class PlayerBar(Gtk.Box):
         self.video_btn.set_margin_end(2)
         self.video_btn.set_margin_bottom(2)
         self.video_btn.set_tooltip_text(
-            "Watch video in Riff (for YouTube videos)")
+            "Show video here (replaces the cover art)")
         vid_icon = Gtk.Label(label="▶")
         vid_icon.add_css_class("caption")
         self.video_btn.set_child(vid_icon)
@@ -123,6 +142,7 @@ class PlayerBar(Gtk.Box):
         self.video_btn.connect("toggled", self._on_video_toggled)
         art_box.add_overlay(self.video_btn)
         now.append(art_box)
+        self._art_box = art_box
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         text.set_valign(Gtk.Align.CENTER)
@@ -308,6 +328,17 @@ class PlayerBar(Gtk.Box):
             self.video_btn.set_active(bool(active))
         finally:
             self._video_sync = False
+        if not active:
+            self.set_video_paintable(None)
+
+    def set_video_paintable(self, paintable) -> None:
+        """Show live video in the cover-art slot (or restore the thumbnail)."""
+        if paintable is None:
+            self.video_picture.set_paintable(None)
+            self.art_stack.set_visible_child_name("art")
+            return
+        self.video_picture.set_paintable(paintable)
+        self.art_stack.set_visible_child_name("video")
 
     def _on_artist_clicked(self, _btn=None) -> None:
         track = self._current

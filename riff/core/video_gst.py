@@ -53,7 +53,13 @@ class GstVideoPlayer:
         self._uri = ""
         self.paintable = None
 
-    def play_uri(self, uri: str) -> None:
+    def play_uri(self, uri: str, *, mute_audio: bool = True) -> None:
+        """Play ``uri`` into a GdkPaintable.
+
+        ``mute_audio=True`` (default) silences GStreamer so mpv can own the
+        soundtrack — YouTube often only offers separate DASH video tracks.
+        Pass ``mute_audio=False`` when the URI is a progressive A+V file.
+        """
         import gi
 
         gi.require_version("Gst", "1.0")
@@ -72,8 +78,20 @@ class GstVideoPlayer:
                 "(sudo pacman -S gst-plugin-gtk4)"
             )
         playbin.set_property("video-sink", sink)
+        if mute_audio:
+            # Video-only (or dual-pipeline) mode: no second audio device fight.
+            fakesink = Gst.ElementFactory.make("fakesink", "riff-asink")
+            if fakesink is not None:
+                fakesink.set_property("sync", True)
+                playbin.set_property("audio-sink", fakesink)
+            else:
+                playbin.set_property("mute", True)
+        else:
+            try:
+                playbin.set_property("mute", False)
+            except Exception:  # noqa: BLE001
+                pass
         playbin.set_property("uri", uri)
-        # Prefer quieter buffer for streaming.
         try:
             playbin.set_property("buffer-size", 2 * 1024 * 1024)
         except Exception:  # noqa: BLE001
@@ -87,7 +105,9 @@ class GstVideoPlayer:
         self._pipeline = playbin
         self._sink = sink
         self._bus = bus
-        playbin.set_state(Gst.State.PLAYING)
+        ret = playbin.set_state(Gst.State.PLAYING)
+        if ret == Gst.StateChangeReturn.FAILURE:
+            raise RuntimeError("GStreamer failed to start playback")
         self._emit_state("playing")
 
     def stop(self) -> None:

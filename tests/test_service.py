@@ -61,7 +61,9 @@ class FakeResolver:
         if video_id in self.fail_ids:
             raise RuntimeError("boom")
         self.resolved.append((video_id, video))
-        return f"https://stream/{video_id}"
+        # Video mode resolves audio first, then may request a video URL.
+        kind = "video" if video else "audio"
+        return f"https://stream/{kind}/{video_id}"
 
 
 class FakeApi:
@@ -103,7 +105,7 @@ def test_play_tracks_resolves_and_plays(monkeypatch):
     svc, engine = make_service(monkeypatch, resolver=resolver)
     svc.play_tracks(tracks(3))
     # only the current track starts playing...
-    assert engine.played == ["https://stream/v0"]
+    assert engine.played == ["https://stream/audio/v0"]
     # ...but the next one is prefetched
     assert resolver.resolved == [("v0", False), ("v1", False)]
 
@@ -114,7 +116,7 @@ def test_track_end_advances(monkeypatch):
     engine.played.clear()
     engine.end_current_track()
     assert svc.current_track.video_id == "v1"
-    assert engine.played == ["https://stream/v1"]
+    assert engine.played == ["https://stream/audio/v1"]
 
 
 def test_resolve_failure_skips_to_next(monkeypatch):
@@ -125,7 +127,7 @@ def test_resolve_failure_skips_to_next(monkeypatch):
     svc.error_listeners.append(errors.append)
     svc.play_tracks(tracks(2))
     assert svc.current_track.video_id == "v1"
-    assert engine.played == ["https://stream/v1"]
+    assert engine.played == ["https://stream/audio/v1"]
     assert errors and "v0" not in engine.played
 
 

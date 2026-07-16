@@ -80,8 +80,7 @@ class PlaybackService:
 
     @property
     def state(self) -> str:
-        if self._using_gst_video:
-            return self._video_state
+        # Audio (mpv) is the source of truth for transport state.
         return self.engine.state
 
     def play_tracks(self, tracks: list[Track], start: int = 0) -> None:
@@ -136,18 +135,14 @@ class PlaybackService:
             self._start_current()
 
     def toggle_pause(self) -> None:
-        if self._using_gst_video and self._video is not None:
-            if self._video_state == STATE_PAUSED:
-                self._video.set_paused(False)
-                self._video_state = STATE_PLAYING
-                self._emit(self.state_listeners, STATE_PLAYING)
-            else:
-                self._video.set_paused(True)
-                self._video_state = STATE_PAUSED
-                self._emit(self.state_listeners, STATE_PAUSED)
-            return
         if self.engine.state in (STATE_PLAYING, STATE_PAUSED):
+            was_playing = self.engine.state == STATE_PLAYING
             self.engine.toggle_pause()
+            # Keep cover video visually in sync with audio.
+            if self._using_gst_video and self._video is not None:
+                self._video.set_paused(was_playing)
+                self._video_state = (
+                    STATE_PAUSED if was_playing else STATE_PLAYING)
         elif self.queue.current:
             self._start_current()
 
@@ -157,10 +152,9 @@ class PlaybackService:
         self.engine.stop()
 
     def seek(self, seconds: float) -> None:
+        self.engine.seek(seconds)
         if self._using_gst_video and self._video is not None:
             self._video.seek(seconds)
-            return
-        self.engine.seek(seconds)
 
     def set_volume(self, volume: int) -> None:
         self.engine.set_volume(volume)
@@ -219,8 +213,7 @@ class PlaybackService:
         self._emit(self.video_paintable_listeners, None)
 
     def _on_engine_position(self, pos: float) -> None:
-        if self._using_gst_video:
-            return  # GStreamer poll owns the scrubber while video is on
+        # Scrubber always follows mpv audio (video is visual-only).
         self._emit(self.position_listeners, pos)
 
     def _ensure_video_player(self) -> GstVideoPlayer:
@@ -252,39 +245,41 @@ class PlaybackService:
 
         want_video = self.video_mode and bool(track.video_id)
 
-        # Resolve the stream URL off the main loop, then start playback.
-        def resolve() -> tuple[str, bool]:
+        # Resolve off the main loop. Video mode always resolves audio for mpv
+        # and (when possible) a separate video URL for the cover-art surface.
+        def resolve() -> tuple[str, str | None]:
+            audio_url = self.resolver.resolve(track.video_id, video=False)
+            video_url = None
             if want_video:
                 try:
-                    return self.resolver.resolve(track.video_id, video=True), True
-                except Exception:  # noqa: BLE001 — fall back to audio
-                    log.warning("video stream failed; using audio", exc_info=True)
-            return self.resolver.resolve(track.video_id, video=False), False
+                    video_url = self.resolver.resolve(track.video_id, video=True)
+                except Exception:  # noqa: BLE001
+                    log.warning("video stream failed; audio only", exc_info=True)
+            return audio_url, video_url
 
         def done(result) -> None:
             if token != self._play_token:
                 return  # user already skipped elsewhere
-            url, is_video = result
-            if is_video and self.video_mode and gst_video_available():
+            audio_url, video_url = result
+            # Soundtrack always through mpv (reliable, volume/MPRIS/gapless).
+            self.engine.play_uri(audio_url)
+            if video_url and self.video_mode and gst_video_available():
                 try:
-                    self.engine.stop()  # audio from GStreamer instead
                     player = self._ensure_video_player()
-                    player.play_uri(url)
+                    # Mute GStreamer: YouTube video tracks are often video-only;
+                    # even when muxed, dual audio would double/desync.
+                    player.play_uri(video_url, mute_audio=True)
                     self._using_gst_video = True
                     self._video_state = STATE_PLAYING
                     self._emit(self.video_paintable_listeners, player.paintable)
-                    self._emit(self.state_listeners, STATE_PLAYING)
                     self._start_video_position_poll()
-                    self._after_start(track)
-                    return
                 except Exception as exc:  # noqa: BLE001
                     log.warning("GStreamer video failed: %s", exc)
                     self._stop_video_backend()
                     self._emit(
                         self.error_listeners,
-                        f"Couldn't show video — playing audio only ({exc})",
+                        f"Couldn't show video — audio only ({exc})",
                     )
-            self.engine.play_uri(url)
             self._after_start(track)
 
         def error(exc: Exception) -> None:
@@ -300,6 +295,7 @@ class PlaybackService:
         run_async(resolve, done, error, name="riff-resolve")
 
     def _start_video_position_poll(self) -> None:
+        """Occasionally re-sync muted cover video to the mpv audio clock."""
         if self._video_pos_id is not None:
             return
         try:
@@ -311,14 +307,16 @@ class PlaybackService:
             if not self._using_gst_video or self._video is None:
                 self._video_pos_id = None
                 return False
-            pos = self._video.position()
-            dur = self._video.duration()
-            self._emit(self.position_listeners, pos)
-            if dur > 0:
-                self._emit(self.duration_listeners, dur)
+            try:
+                audio_pos = float(self.engine.position or 0)
+                video_pos = float(self._video.position() or 0)
+                if audio_pos > 0 and abs(audio_pos - video_pos) > 0.45:
+                    self._video.seek(audio_pos)
+            except Exception:  # noqa: BLE001
+                pass
             return True
 
-        self._video_pos_id = GLib.timeout_add(250, tick)
+        self._video_pos_id = GLib.timeout_add(1000, tick)
 
     def _after_start(self, track: Track) -> None:
         run_async(lambda: self.library.record_play(track), name="riff-history")

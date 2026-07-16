@@ -17,11 +17,15 @@ _QUALITY_FORMATS = {
     "low": "bestaudio[abr<=96]/bestaudio/best",
 }
 
-# Progressive / muxed A+V under 720p preferred for in-app video (NewPipe-style).
+# Video track for the cover-art surface. Prefer progressive muxed (has audio
+# too); otherwise a video-only stream — the service keeps audio on mpv.
 _VIDEO_FORMAT = (
-    "best[height<=720][ext=mp4]/"
-    "best[height<=720]/"
-    "best[ext=mp4]/"
+    "best[height<=720][ext=mp4][acodec!=none][vcodec!=none]/"
+    "best[height<=480][acodec!=none][vcodec!=none]/"
+    "18/"  # classic progressive 360p mp4 when still offered
+    "bestvideo[height<=720][ext=mp4]/"
+    "bestvideo[height<=720]/"
+    "bestvideo/"
     "best"
 )
 
@@ -118,28 +122,54 @@ class StreamResolver:
 
     @staticmethod
     def _pick_video_url(info: dict | None) -> str:
-        """Prefer a single progressive URL (A+V) for GStreamer playbin."""
+        """Pick a video URL for the in-app surface.
+
+        Prefers progressive A+V (so GStreamer can play sound alone), then
+        falls back to video-only (audio stays on mpv).
+        """
         if not info:
             return ""
-        if info.get("url"):
+        if info.get("url") and info.get("vcodec") not in (None, "none"):
             return info["url"]
-        # Prefer formats that already contain both audio and video.
-        best = None
+
+        best_muxed = None
+        best_video = None
         for f in info.get("formats") or []:
             if not f.get("url"):
                 continue
-            if f.get("acodec") in (None, "none"):
-                continue
-            if f.get("vcodec") in (None, "none"):
+            vcodec = f.get("vcodec")
+            acodec = f.get("acodec")
+            if vcodec in (None, "none"):
                 continue
             height = f.get("height") or 0
-            tbr = f.get("tbr") or 0
+            tbr = f.get("tbr") or f.get("vbr") or 0
             score = (height, tbr)
-            if best is None or score > best[0]:
-                best = (score, f["url"])
-        if best:
-            return best[1]
-        # requested_formats is usually separate video+audio — playbin needs one URI.
+            if acodec not in (None, "none"):
+                if best_muxed is None or score > best_muxed[0]:
+                    best_muxed = (score, f["url"], True)
+            else:
+                if best_video is None or score > best_video[0]:
+                    best_video = (score, f["url"], False)
+
+        # Also check requested_formats (yt-dlp sometimes only lists video there).
+        for f in info.get("requested_formats") or []:
+            if not f.get("url") or f.get("vcodec") in (None, "none"):
+                continue
+            height = f.get("height") or 0
+            tbr = f.get("tbr") or f.get("vbr") or 0
+            score = (height, tbr)
+            has_a = f.get("acodec") not in (None, "none")
+            if has_a:
+                if best_muxed is None or score > best_muxed[0]:
+                    best_muxed = (score, f["url"], True)
+            else:
+                if best_video is None or score > best_video[0]:
+                    best_video = (score, f["url"], False)
+
+        if best_muxed:
+            return best_muxed[1]
+        if best_video:
+            return best_video[1]
         if info.get("url"):
             return info["url"]
         return ""
