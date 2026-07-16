@@ -872,9 +872,20 @@ class PlaylistsPage(ContentPage):
         self.show_widget(scroll_wrap(_padded(box)))
 
     def _folder_block(self, item: dict, covers: dict) -> Gtk.Widget:
+        from gi.repository import Gdk, GObject
+
         block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label=f"📁  {item['name']}")
+        ficon = item.get("icon") or "folder-music-symbolic"
+        icon_btn = Gtk.Button()
+        icon_btn.add_css_class("flat")
+        icon_btn.set_tooltip_text("Change folder icon")
+        icon_btn.set_child(iconutil.image(ficon, size=22))
+        icon_btn.connect(
+            "clicked",
+            lambda *_: self.window.choose_folder_icon(item["id"], ficon))
+        header.append(icon_btn)
+        title = Gtk.Label(label=item["name"])
         title.add_css_class("title-3")
         title.set_xalign(0.0)
         title.set_hexpand(True)
@@ -896,13 +907,21 @@ class PlaylistsPage(ContentPage):
         listbox = Gtk.ListBox()
         listbox.add_css_class("boxed-list")
         listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        # Drop playlists onto the folder's list area.
+        drop = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        drop.connect(
+            "drop",
+            lambda _t, value, _x, _y, fid=item["id"]:
+                self.window._on_playlist_dropped(value, fid))
+        listbox.add_controller(drop)
         if item["playlists"]:
             for pid, name, count in item["playlists"]:
                 listbox.append(self._playlist_row(pid, name, count, covers))
         else:
             empty = Adw.ActionRow()
             empty.set_title("Empty folder")
-            empty.set_subtitle("Move playlists here from the ⋮ menu")
+            empty.set_subtitle(
+                "Drag a playlist here, or use Move to folder on a playlist")
             empty.set_sensitive(False)
             listbox.append(empty)
         block.append(listbox)
@@ -910,14 +929,24 @@ class PlaylistsPage(ContentPage):
 
     def _playlist_row(self, pid: int, name: str, count: int,
                       covers: dict) -> Adw.ActionRow:
+        from gi.repository import Gdk
+
         row = Adw.ActionRow()
         row.set_title(name)
-        row.set_subtitle(f"{count} songs")
+        row.set_subtitle(f"{count} songs · drag to a folder")
         row.set_activatable(True)
         art = CoverArt(44, icon="view-list-symbolic")
         art.set_url(covers.get(pid, ""))
         art.set_valign(Gtk.Align.CENTER)
         row.add_prefix(art)
+        # Drag playlist onto a folder.
+        source = Gtk.DragSource()
+        source.set_actions(Gdk.DragAction.MOVE)
+        source.connect(
+            "prepare",
+            lambda _s, _x, _y, p=pid:
+                Gdk.ContentProvider.new_for_value(f"playlist:{p}"))
+        row.add_controller(source)
         move = Gtk.Button()
         iconutil.set_button(move, "folder-music-symbolic")
         move.add_css_class("flat")

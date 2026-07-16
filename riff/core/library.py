@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS playlist_folders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    icon TEXT NOT NULL DEFAULT 'folder-music-symbolic'
 );
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,8 +103,19 @@ class Library:
             "id INTEGER PRIMARY KEY AUTOINCREMENT,"
             "name TEXT NOT NULL,"
             "position INTEGER NOT NULL DEFAULT 0,"
-            "created_at REAL NOT NULL)"
+            "created_at REAL NOT NULL,"
+            "icon TEXT NOT NULL DEFAULT 'folder-music-symbolic')"
         )
+        fcols = {
+            r[1]
+            for r in self._db.execute(
+                "PRAGMA table_info(playlist_folders)").fetchall()
+        }
+        if fcols and "icon" not in fcols:
+            self._db.execute(
+                "ALTER TABLE playlist_folders ADD COLUMN icon TEXT "
+                "NOT NULL DEFAULT 'folder-music-symbolic'"
+            )
 
     # -- favorites ---------------------------------------------------------
 
@@ -176,15 +188,37 @@ class Library:
 
     # -- playlist folders (Spotify-style) --------------------------------------
 
-    def create_folder(self, name: str) -> int:
+    # Icons we ship under riff/ui/icons/ — shown in the folder icon picker.
+    FOLDER_ICONS: tuple[tuple[str, str], ...] = (
+        ("folder-music-symbolic", "Music"),
+        ("folder-download-symbolic", "Downloads"),
+        ("emblem-favorite-symbolic", "Favorites"),
+        ("emblem-music-symbolic", "Note"),
+        ("media-optical-symbolic", "Album"),
+        ("view-list-symbolic", "List"),
+        ("view-list-ordered-symbolic", "Queue"),
+        ("audio-x-generic-symbolic", "Audio"),
+        ("user-home-symbolic", "Home"),
+        ("web-browser-symbolic", "Discover"),
+        ("document-open-recent-symbolic", "Recent"),
+        ("riff-stats-symbolic", "Stats"),
+        ("system-search-symbolic", "Search"),
+        ("media-playlist-shuffle-symbolic", "Shuffle"),
+    )
+    DEFAULT_FOLDER_ICON = "folder-music-symbolic"
+
+    def create_folder(self, name: str, icon: str | None = None) -> int:
+        icon = icon or self.DEFAULT_FOLDER_ICON
+        if icon not in {i for i, _ in self.FOLDER_ICONS}:
+            icon = self.DEFAULT_FOLDER_ICON
         with self._lock, self._db:
             row = self._db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM playlist_folders"
             ).fetchone()
             cur = self._db.execute(
-                "INSERT INTO playlist_folders (name, position, created_at) "
-                "VALUES (?,?,?)",
-                (name, row[0] + 1, time.time()),
+                "INSERT INTO playlist_folders (name, position, created_at, icon) "
+                "VALUES (?,?,?,?)",
+                (name, row[0] + 1, time.time(), icon),
             )
             return cur.lastrowid
 
@@ -193,6 +227,15 @@ class Library:
             self._db.execute(
                 "UPDATE playlist_folders SET name = ? WHERE id = ?",
                 (name, folder_id),
+            )
+
+    def set_folder_icon(self, folder_id: int, icon: str) -> None:
+        if icon not in {i for i, _ in self.FOLDER_ICONS}:
+            icon = self.DEFAULT_FOLDER_ICON
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE playlist_folders SET icon = ? WHERE id = ?",
+                (icon, folder_id),
             )
 
     def delete_folder(self, folder_id: int) -> None:
@@ -206,22 +249,34 @@ class Library:
                 "DELETE FROM playlist_folders WHERE id = ?", (folder_id,)
             )
 
-    def folders(self) -> list[tuple[int, str]]:
-        """[(id, name)] ordered for the sidebar."""
+    def folders(self) -> list[tuple[int, str, str]]:
+        """[(id, name, icon)] ordered for the sidebar."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, name FROM playlist_folders "
-                "ORDER BY position, created_at"
+                "SELECT id, name, COALESCE(icon, 'folder-music-symbolic') "
+                "FROM playlist_folders ORDER BY position, created_at"
             ).fetchall()
-        return [(r[0], r[1]) for r in rows]
+        return [(r[0], r[1], r[2]) for r in rows]
 
     def set_playlist_folder(
         self, playlist_id: int, folder_id: int | None
     ) -> None:
         with self._lock, self._db:
+            # Place at end of the destination folder (or root).
+            if folder_id is None:
+                row = self._db.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM playlists "
+                    "WHERE folder_id IS NULL"
+                ).fetchone()
+            else:
+                row = self._db.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM playlists "
+                    "WHERE folder_id = ?",
+                    (folder_id,),
+                ).fetchone()
             self._db.execute(
-                "UPDATE playlists SET folder_id = ? WHERE id = ?",
-                (folder_id, playlist_id),
+                "UPDATE playlists SET folder_id = ?, position = ? WHERE id = ?",
+                (folder_id, row[0] + 1, playlist_id),
             )
 
     def playlist_folder_id(self, playlist_id: int) -> int | None:
@@ -306,11 +361,12 @@ class Library:
         """
         folders = self.folders()
         tree: list[dict] = []
-        for fid, fname in folders:
+        for fid, fname, ficon in folders:
             tree.append({
                 "kind": "folder",
                 "id": fid,
                 "name": fname,
+                "icon": ficon,
                 "playlists": self.playlists(folder_id=fid),
             })
         for pid, name, count in self.playlists(folder_id=None):

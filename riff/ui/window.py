@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from gi.repository import Adw, Gio, GLib, Gtk
+from gi.repository import Adw, Gdk, Gio, GLib, GObject, Gtk
 
 log = logging.getLogger("riff.window")
 
@@ -45,7 +45,7 @@ CSS = b"""
     background-color: @headerbar_bg_color;
     border-top: 1px solid @borders;
 }
-/* Compact Home “For you” chips */
+/* Compact Home "For you" chips */
 button.riff-for-you-chip {
     padding: 0;
     min-height: 0;
@@ -54,6 +54,11 @@ button.riff-for-you-chip {
 }
 button.riff-for-you-chip:hover {
     background-color: alpha(currentColor, 0.12);
+}
+/* Drop target highlight when dragging a playlist onto a folder. */
+row.riff-drop-hover {
+    background-color: alpha(@accent_bg_color, 0.35);
+    border-radius: 8px;
 }
 /* Keep cover tiles from growing with huge YouTube textures. */
 .riff-cover {
@@ -453,11 +458,11 @@ class MainWindow(Adw.ApplicationWindow):
     def _add_folder_row(self, item: dict, covers: dict[int, str]) -> None:
         from gi.repository import Pango
 
-        from . import iconutil
         from .widgets import CoverArt
 
         fid = item["id"]
         name = item["name"]
+        ficon = item.get("icon") or self.library.DEFAULT_FOLDER_ICON
         children = item["playlists"]
         expanded = fid in self._expanded_folders
         n = len(children)
@@ -466,16 +471,17 @@ class MainWindow(Adw.ApplicationWindow):
         row = Gtk.ListBoxRow()
         row.kind = "folder"
         row.ref = fid
+        self._install_folder_drop(row, fid)
 
         if self._sidebar_collapsed:
-            art = CoverArt(52, icon="folder-music-symbolic")
+            art = CoverArt(52, icon=ficon)
             art.set_margin_top(4)
             art.set_margin_bottom(4)
             art.set_halign(Gtk.Align.CENTER)
             row.set_child(art)
-            row.set_tooltip_text(f"{name}\n{n} {plural}")
+            row.set_tooltip_text(
+                f"{name}\n{n} {plural}\nDrop playlists here")
             self.playlist_list.append(row)
-            # When collapsed, still show children as cover tiles under it.
             if expanded:
                 for pid, pname, count in children:
                     ppl = "song" if count == 1 else "songs"
@@ -492,7 +498,7 @@ class MainWindow(Adw.ApplicationWindow):
         chevron.add_css_class("dim-label")
         chevron.set_width_chars(1)
         box.append(chevron)
-        icon = iconutil.image("folder-music-symbolic", size=18)
+        icon = iconutil.image(ficon, size=18)
         icon.set_valign(Gtk.Align.CENTER)
         box.append(icon)
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
@@ -502,7 +508,7 @@ class MainWindow(Adw.ApplicationWindow):
         t.set_xalign(0.0)
         t.set_ellipsize(Pango.EllipsizeMode.END)
         t.add_css_class("heading")
-        s = Gtk.Label(label=f"{n} {plural}")
+        s = Gtk.Label(label=f"{n} {plural} · drop playlists here")
         s.set_xalign(0.0)
         s.add_css_class("dim-label")
         s.add_css_class("caption")
@@ -510,6 +516,7 @@ class MainWindow(Adw.ApplicationWindow):
         text_box.append(s)
         box.append(text_box)
         row.set_child(box)
+        row.set_tooltip_text("Click to expand · drag playlists onto this folder")
         self.playlist_list.append(row)
 
         if expanded:
@@ -530,15 +537,25 @@ class MainWindow(Adw.ApplicationWindow):
         row.kind = kind
         row.ref = ref
 
+        if kind == "local":
+            pid = ref[0] if isinstance(ref, tuple) else ref
+            self._install_playlist_drag(row, int(pid))
+            # Right-click → move to folder
+            gesture = Gtk.GestureClick()
+            gesture.set_button(3)
+            gesture.connect(
+                "pressed",
+                lambda _g, _n, _x, _y, p=int(pid): self.choose_folder_for(p))
+            row.add_controller(gesture)
+
         if self._sidebar_collapsed:
-            # Spotify-style rail: just the cover tile, name in the tooltip.
             art = CoverArt(52, icon="view-list-symbolic")
             art.set_url(cover)
             art.set_margin_top(4)
             art.set_margin_bottom(4)
             art.set_halign(Gtk.Align.CENTER)
             row.set_child(art)
-            row.set_tooltip_text(f"{title}\n{subtitle}")
+            row.set_tooltip_text(f"{title}\n{subtitle}\nDrag onto a folder")
             self.playlist_list.append(row)
             return
 
@@ -552,6 +569,7 @@ class MainWindow(Adw.ApplicationWindow):
         box.append(art)
         text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
         text_box.set_valign(Gtk.Align.CENTER)
+        text_box.set_hexpand(True)
         t = Gtk.Label(label=title)
         t.set_xalign(0.0)
         t.set_ellipsize(Pango.EllipsizeMode.END)
@@ -565,7 +583,53 @@ class MainWindow(Adw.ApplicationWindow):
         text_box.append(s)
         box.append(text_box)
         row.set_child(box)
+        row.set_tooltip_text(f"{title}\nDrag onto a folder · right-click to move")
         self.playlist_list.append(row)
+
+    def _install_playlist_drag(self, row: Gtk.ListBoxRow, playlist_id: int) -> None:
+        source = Gtk.DragSource()
+        source.set_actions(Gdk.DragAction.MOVE)
+        source.connect(
+            "prepare",
+            lambda _s, _x, _y, pid=playlist_id:
+                Gdk.ContentProvider.new_for_value(f"playlist:{pid}"))
+        row.add_controller(source)
+
+    def _install_folder_drop(self, row: Gtk.ListBoxRow, folder_id: int) -> None:
+        target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        target.connect(
+            "drop",
+            lambda _t, value, _x, _y, fid=folder_id:
+                self._on_playlist_dropped(value, fid))
+        target.connect(
+            "enter",
+            lambda *_a: (row.add_css_class("riff-drop-hover"),
+                         Gdk.DragAction.MOVE)[1])
+        target.connect(
+            "leave",
+            lambda *_a: row.remove_css_class("riff-drop-hover"))
+        row.add_controller(target)
+
+    def _on_playlist_dropped(self, value, folder_id: int | None) -> bool:
+        try:
+            raw = str(value)
+            if raw.startswith("playlist:"):
+                pid = int(raw.split(":", 1)[1])
+            else:
+                pid = int(raw)
+        except (TypeError, ValueError):
+            return False
+        self.library.set_playlist_folder(pid, folder_id)
+        if folder_id is not None:
+            self._expanded_folders.add(folder_id)
+            config.settings.set(
+                "expanded_folders", sorted(self._expanded_folders))
+        self.reload_sidebar_playlists()
+        page = self.pages.get("playlists")
+        if page is not None and hasattr(page, "refresh"):
+            page.refresh()
+        self.toast("Moved to folder" if folder_id is not None else "Moved to root")
+        return True
 
     def _on_sidebar_playlist(self, _lb, row) -> None:
         kind = getattr(row, "kind", None)
@@ -641,7 +705,7 @@ class MainWindow(Adw.ApplicationWindow):
             self.prompt_text("New Playlist", "Name", lambda name: (
                 self.library.add_to_playlist(
                     self.library.create_playlist(name), track),
-                self.toast(f"Added to “{name}”"),
+                self.toast(f'Added to "{name}"'),
                 self.reload_sidebar_playlists()))))
         box.append(new_btn)
         dialog.set_extra_child(box)
@@ -649,10 +713,10 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.present(self)
 
     def download_track(self, track: Track) -> None:
-        self.toast(f"Downloading “{track.title}”…")
+        self.toast(f'Downloading "{track.title}"…')
 
         def done(path: str) -> None:
-            self.toast(f"Downloaded “{track.title}”")
+            self.toast(f'Downloaded "{track.title}"')
 
         def error(exc: Exception) -> None:
             self.toast(f"Download failed: {exc}")
@@ -775,40 +839,130 @@ class MainWindow(Adw.ApplicationWindow):
                           self.reload_sidebar_playlists()))
 
     def create_folder_dialog(self) -> None:
-        self.prompt_text(
-            "New Folder", "Name",
-            lambda name: (self.library.create_folder(name),
-                          self.reload_sidebar_playlists(),
-                          self.toast(f"Folder “{name}” created")))
+        self._folder_editor_dialog(title="New Folder", accept_label="Create")
+
+    def choose_folder_icon(self, folder_id: int, current: str = "") -> None:
+        """Pick an icon for an existing folder."""
+        self._folder_icon_picker(
+            current or self.library.DEFAULT_FOLDER_ICON,
+            on_pick=lambda icon: (
+                self.library.set_folder_icon(folder_id, icon),
+                self.reload_sidebar_playlists(),
+                self.pages["playlists"].refresh(),
+                self.toast("Folder icon updated")))
+
+    def _folder_editor_dialog(self, title: str = "New Folder",
+                              accept_label: str = "Create",
+                              initial_name: str = "",
+                              initial_icon: str | None = None,
+                              on_accept=None) -> None:
+        """Name + icon for a new folder (or rename with icon)."""
+        icon = {"value": initial_icon or self.library.DEFAULT_FOLDER_ICON}
+        dialog = Adw.AlertDialog.new(title, "Choose a name and an icon")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Name")
+        entry.set_text(initial_name)
+        entry.set_margin_top(4)
+        box.append(entry)
+
+        icon_btn = Gtk.Button()
+        icon_btn.add_css_class("pill")
+        icon_btn.set_halign(Gtk.Align.START)
+
+        def paint_icon_btn() -> None:
+            icon_btn.set_child(
+                _folder_icon_btn_content(icon["value"], "Change icon"))
+
+        paint_icon_btn()
+        icon_btn.connect(
+            "clicked",
+            lambda *_: self._folder_icon_picker(
+                icon["value"],
+                on_pick=lambda i: (icon.update(value=i), paint_icon_btn())))
+        box.append(icon_btn)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("ok", accept_label)
+        dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("ok")
+
+        def on_response(_d, response: str) -> None:
+            name = entry.get_text().strip()
+            if response != "ok" or not name:
+                return
+            if on_accept is not None:
+                on_accept(name, icon["value"])
+                return
+            self.library.create_folder(name, icon=icon["value"])
+            self.reload_sidebar_playlists()
+            page = self.pages.get("playlists")
+            if page is not None and hasattr(page, "refresh"):
+                page.refresh()
+            self.toast(f'Folder "{name}" created')
+
+        dialog.connect("response", on_response)
+        entry.connect("activate", lambda *_: (
+            on_response(dialog, "ok"), dialog.close()))
+        dialog.present(self)
+
+    def _folder_icon_picker(self, current: str, on_pick) -> None:
+        dialog = Adw.AlertDialog.new("Folder icon", "Pick a symbol")
+        flow = Gtk.FlowBox()
+        flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        flow.set_max_children_per_line(5)
+        flow.set_min_children_per_line(4)
+        flow.set_column_spacing(6)
+        flow.set_row_spacing(6)
+        flow.set_margin_top(8)
+
+        for icon_name, label in self.library.FOLDER_ICONS:
+            btn = Gtk.Button()
+            btn.add_css_class("flat")
+            if icon_name == current:
+                btn.add_css_class("suggested-action")
+            btn.set_tooltip_text(label)
+            btn.set_child(iconutil.image(icon_name, size=22))
+            btn.connect("clicked", lambda _b, i=icon_name: (
+                on_pick(i), dialog.close()))
+            flow.append(btn)
+
+        dialog.set_extra_child(flow)
+        dialog.add_response("cancel", "Cancel")
+        dialog.present(self)
 
     def choose_folder_for(self, playlist_id: int) -> None:
-        """Move a local playlist into a folder (or root)."""
+        """Move a local playlist into a folder (or root) — button-based picker."""
         folders = self.library.folders()
-        dialog = Adw.AlertDialog.new("Move to folder", None)
+        dialog = Adw.AlertDialog.new(
+            "Move to folder",
+            "Choose a folder, or put the playlist back at the root.")
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        listbox = Gtk.ListBox()
-        listbox.add_css_class("boxed-list")
-        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        box.set_margin_top(6)
 
-        def pick(folder_id: int | None, label: str):
-            row = Adw.ActionRow()
-            row.set_title(label)
-            row.set_activatable(True)
-            row.connect("activated", lambda _r, fid=folder_id: (
+        def add_option(folder_id: int | None, label: str, icon: str | None = None):
+            btn = Gtk.Button()
+            btn.add_css_class("pill")
+            btn.set_halign(Gtk.Align.FILL)
+            if icon:
+                btn.set_child(_folder_icon_btn_content(icon, label))
+            else:
+                btn.set_label(label)
+            btn.connect("clicked", lambda _b, fid=folder_id: (
                 self.library.set_playlist_folder(playlist_id, fid),
-                self.toast("Moved" if fid is not None else "Moved to root"),
+                self.toast(
+                    "Moved to folder" if fid is not None else "Moved to root"),
                 self.reload_sidebar_playlists(),
-                (self.pages["playlists"].refresh()
-                 if "playlists" in self.pages else None),
+                self.pages["playlists"].refresh(),
                 dialog.close()))
-            listbox.append(row)
+            box.append(btn)
 
-        pick(None, "No folder (root)")
-        for fid, fname in folders:
-            pick(fid, fname)
-        box.append(listbox)
+        add_option(None, "No folder (root)")
+        for fid, fname, ficon in folders:
+            add_option(fid, fname, ficon)
         if not folders:
-            hint = Gtk.Label(label="Create a folder from the sidebar ＋ menu first")
+            hint = Gtk.Label(
+                label="Create a folder from the sidebar ＋ menu first")
             hint.add_css_class("dim-label")
             hint.set_wrap(True)
             box.append(hint)
@@ -816,7 +970,6 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.add_response("cancel", "Cancel")
         dialog.present(self)
 
-    # -- shortcuts overlay -------------------------------------------------------
 
     SHORTCUTS = [
         ("Basic", [
@@ -1208,3 +1361,13 @@ class MainWindow(Adw.ApplicationWindow):
         config.settings.set("window_width", w)
         config.settings.set("window_height", h)
         return False
+
+
+def _folder_icon_btn_content(icon_name: str, label: str) -> Gtk.Box:
+    row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+    row.append(iconutil.image(icon_name, size=18))
+    row.append(Gtk.Label(label=label))
+    return row
+
+    # -- shortcuts overlay -------------------------------------------------------
+
