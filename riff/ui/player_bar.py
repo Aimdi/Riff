@@ -8,7 +8,7 @@ from .. import config
 from ..core.models import format_duration
 from ..core.player import STATE_LOADING, STATE_PLAYING
 from ..core.queue import REPEAT_ALL, REPEAT_ONE
-from .widgets import CoverArt, _ellipsized
+from .widgets import CoverArt, _ellipsized, build_track_menu
 
 
 class PlayerBar(Gtk.Box):
@@ -69,6 +69,17 @@ class PlayerBar(Gtk.Box):
         self.fav_button.set_tooltip_text("Add to favorites")
         self.fav_button.connect("clicked", self._on_favorite)
         now.append(self.fav_button)
+
+        # Full song menu for whatever is playing right now — favoriting,
+        # playlists, download, radio must never depend on finding the song
+        # in a list somewhere.
+        self.track_menu_btn = Gtk.MenuButton()
+        self.track_menu_btn.set_icon_name("view-more-symbolic")
+        self.track_menu_btn.add_css_class("flat")
+        self.track_menu_btn.set_valign(Gtk.Align.CENTER)
+        self.track_menu_btn.set_tooltip_text("Song actions")
+        self.track_menu_btn.set_sensitive(False)
+        now.append(self.track_menu_btn)
         row.set_start_widget(now)
 
         # center: transport
@@ -149,8 +160,14 @@ class PlayerBar(Gtk.Box):
             self.pos_label.set_label("0:00")
             self.dur_label.set_label("0:00")
             self.fav_button.set_sensitive(False)
+            self.track_menu_btn.set_sensitive(False)
             return
         self.fav_button.set_sensitive(True)
+        self.track_menu_btn.set_sensitive(True)
+        menu, group = build_track_menu(self.window, track,
+                                       on_favorite=self._on_favorite)
+        self.track_menu_btn.set_menu_model(menu)
+        self.track_menu_btn.insert_action_group("trk", group)
         self.title_label.set_label(track.title)
         self.artist_label.set_label(track.artist)
         self.art.set_url(track.thumbnail)
@@ -209,7 +226,7 @@ class PlayerBar(Gtk.Box):
             self.repeat_btn.remove_css_class("accent")
         self.repeat_btn.set_tooltip_text(f"Repeat: {mode}")
 
-    def _on_favorite(self, _btn) -> None:
+    def _on_favorite(self, _btn=None) -> None:
         track = self.service.current_track
         if track is None:
             return

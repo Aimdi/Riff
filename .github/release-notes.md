@@ -1,6 +1,6 @@
-## Riff 0.1.2 🎵
+## Riff 0.1.3 🎵
 
-Fixes missing cover art on home/browse cards (thumbnail URL size rewriting broke some googleusercontent variants; now rewrites only the size numbers and falls back to the original URL). Adds a visible favorite (heart) button on every song row, surfaces radio failures as toasts instead of failing silently, and adds an optional YouTube Music account connection for personalized recommendations (see README).
+Song actions are now always reachable: the player bar gets a full song menu (favorite, add to playlist, download, start radio, go to album/artist) for whatever is currently playing, and every queue row gets the same menu — previously these only existed on song rows in search/album/playlist lists.
 
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 

@@ -57,6 +57,68 @@ def _ellipsized(text: str, css: list[str] | None = None, align_start: bool = Tru
     return label
 
 
+def build_track_menu(window, track: Track, on_favorite=None):
+    """Build the standard per-song menu.
+
+    Returns (menu_model, action_group); insert the group with prefix "trk"
+    on the widget that hosts the menu. Used by track rows, the queue panel
+    and the player bar so every place a song appears offers the same
+    actions.
+    """
+    menu = Gio.Menu()
+    sec1 = Gio.Menu()
+    sec1.append("Play Next", "trk.play-next")
+    sec1.append("Add to Queue", "trk.add-queue")
+    sec1.append("Start Radio", "trk.radio")
+    menu.append_section(None, sec1)
+
+    sec2 = Gio.Menu()
+    fav = ("Remove from Favorites"
+           if window.library.is_favorite(track.video_id)
+           else "Add to Favorites")
+    sec2.append(fav, "trk.favorite")
+    sec2.append("Add to Playlist…", "trk.add-playlist")
+    sec2.append("Download", "trk.download")
+    menu.append_section(None, sec2)
+
+    sec3 = Gio.Menu()
+    if track.album_id:
+        sec3.append("Go to Album", "trk.go-album")
+    if any(track.artist_ids):
+        sec3.append("Go to Artist", "trk.go-artist")
+    if sec3.get_n_items():
+        menu.append_section(None, sec3)
+
+    def default_favorite():
+        added = window.library.toggle_favorite(track)
+        window.toast("Added to favorites" if added else "Removed from favorites")
+
+    def go_artist():
+        for aid in track.artist_ids:
+            if aid:
+                window.open_artist(aid)
+                return
+
+    actions = {
+        "play-next": lambda: (window.service.add_next([track]),
+                              window.toast("Playing next")),
+        "add-queue": lambda: (window.service.add_to_queue([track]),
+                              window.toast("Added to queue")),
+        "radio": lambda: window.service.play_track_with_radio(track),
+        "favorite": on_favorite or default_favorite,
+        "add-playlist": lambda: window.choose_playlist_for(track),
+        "download": lambda: window.download_track(track),
+        "go-album": lambda: window.open_album(track.album_id),
+        "go-artist": go_artist,
+    }
+    group = Gio.SimpleActionGroup()
+    for name, cb in actions.items():
+        action = Gio.SimpleAction.new(name, None)
+        action.connect("activate", lambda _a, _p, cb=cb: cb())
+        group.add_action(action)
+    return menu, group
+
+
 class TrackRow(Gtk.ListBoxRow):
     """One track in a list: art, title/artist, duration, context menu."""
 
@@ -111,56 +173,13 @@ class TrackRow(Gtk.ListBoxRow):
         menu_btn.add_css_class("flat")
         menu_btn.set_valign(Gtk.Align.CENTER)
         menu_btn.set_tooltip_text("More actions")
-        menu_btn.set_menu_model(self._build_menu())
-        self._install_actions()
+        menu, group = build_track_menu(window, track,
+                                       on_favorite=self._toggle_favorite)
+        menu_btn.set_menu_model(menu)
+        self.insert_action_group("trk", group)
         box.append(menu_btn)
 
         self.set_child(box)
-
-    # -- context menu ----------------------------------------------------------
-
-    def _build_menu(self) -> Gio.Menu:
-        menu = Gio.Menu()
-        sec1 = Gio.Menu()
-        sec1.append("Play Next", "row.play-next")
-        sec1.append("Add to Queue", "row.add-queue")
-        sec1.append("Start Radio", "row.radio")
-        menu.append_section(None, sec1)
-
-        sec2 = Gio.Menu()
-        fav = "Remove from Favorites" if self._window.library.is_favorite(
-            self.track.video_id) else "Add to Favorites"
-        sec2.append(fav, "row.favorite")
-        sec2.append("Add to Playlist…", "row.add-playlist")
-        sec2.append("Download", "row.download")
-        menu.append_section(None, sec2)
-
-        sec3 = Gio.Menu()
-        if self.track.album_id:
-            sec3.append("Go to Album", "row.go-album")
-        if any(self.track.artist_ids):
-            sec3.append("Go to Artist", "row.go-artist")
-        if sec3.get_n_items():
-            menu.append_section(None, sec3)
-        return menu
-
-    def _install_actions(self) -> None:
-        group = Gio.SimpleActionGroup()
-        actions = {
-            "play-next": lambda: self._window.service.add_next([self.track]),
-            "add-queue": lambda: self._window.service.add_to_queue([self.track]),
-            "radio": lambda: self._window.service.play_track_with_radio(self.track),
-            "favorite": self._toggle_favorite,
-            "add-playlist": lambda: self._window.choose_playlist_for(self.track),
-            "download": lambda: self._window.download_track(self.track),
-            "go-album": lambda: self._window.open_album(self.track.album_id),
-            "go-artist": self._go_artist,
-        }
-        for name, cb in actions.items():
-            action = Gio.SimpleAction.new(name, None)
-            action.connect("activate", lambda _a, _p, cb=cb: cb())
-            group.add_action(action)
-        self.insert_action_group("row", group)
 
     def _toggle_favorite(self) -> None:
         added = self._window.library.toggle_favorite(self.track)
@@ -169,12 +188,6 @@ class TrackRow(Gtk.ListBoxRow):
         else:
             self._fav_btn.remove_css_class("accent")
         self._window.toast("Added to favorites" if added else "Removed from favorites")
-
-    def _go_artist(self) -> None:
-        for aid in self.track.artist_ids:
-            if aid:
-                self._window.open_artist(aid)
-                return
 
 
 class TrackList(Gtk.ListBox):

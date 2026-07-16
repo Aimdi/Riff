@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from gi.repository import Gtk, Pango
 
-from .widgets import CoverArt
+from .widgets import CoverArt, build_track_menu
 
 
 class QueuePanel(Gtk.Box):
@@ -89,9 +89,19 @@ class QueuePanel(Gtk.Box):
             text.append(a)
             box.append(text)
 
+            menu_btn = Gtk.MenuButton()
+            menu_btn.set_icon_name("view-more-symbolic")
+            menu_btn.add_css_class("flat")
+            menu_btn.set_valign(Gtk.Align.CENTER)
+            menu, group = build_track_menu(self.window, track)
+            menu_btn.set_menu_model(menu)
+            row.insert_action_group("trk", group)
+            box.append(menu_btn)
+
             remove = Gtk.Button.new_from_icon_name("window-close-symbolic")
             remove.add_css_class("flat")
             remove.set_valign(Gtk.Align.CENTER)
+            remove.set_tooltip_text("Remove from queue")
             remove.connect("clicked", self._on_remove, i)
             box.append(remove)
 
