@@ -9,7 +9,12 @@ from . import iconutil, images
 
 
 class CoverArt(Gtk.Frame):
-    """Square cover image with rounded corners and a placeholder icon."""
+    """Square cover image with rounded corners and a placeholder icon.
+
+    Sized strictly to ``size``×``size``. YouTube often serves large or 16:9
+    video thumbnails; without clamping, Gtk.Picture grows to the texture's
+    natural size and blows out layouts (especially the player bar).
+    """
 
     def __init__(self, size: int = 48, icon: str = "audio-x-generic-symbolic",
                  circular: bool = False):
@@ -20,15 +25,36 @@ class CoverArt(Gtk.Frame):
         if circular:
             self.add_css_class("riff-cover-circular")
         self.set_size_request(size, size)
-        self._picture = Gtk.Picture()
-        self._picture.set_size_request(size, size)
+        self.set_hexpand(False)
+        self.set_vexpand(False)
+        self.set_halign(Gtk.Align.CENTER)
+        self.set_valign(Gtk.Align.CENTER)
         try:
-            self._picture.set_content_fit(Gtk.ContentFit.COVER)
+            self.set_overflow(Gtk.Overflow.HIDDEN)
         except AttributeError:
             pass
+        self._picture = Gtk.Picture()
+        self._configure_picture(self._picture)
         self._placeholder = iconutil.image(icon, size=max(16, size // 3))
         self._placeholder.add_css_class("dim-label")
         self.set_child(self._placeholder)
+
+    def _configure_picture(self, picture: Gtk.Picture) -> None:
+        picture.set_size_request(self.size, self.size)
+        picture.set_hexpand(False)
+        picture.set_vexpand(False)
+        # Critical: without can_shrink, Picture sizes to the full texture.
+        try:
+            picture.set_can_shrink(True)
+        except AttributeError:
+            pass
+        try:
+            picture.set_content_fit(Gtk.ContentFit.COVER)
+        except AttributeError:
+            try:
+                picture.set_keep_aspect_ratio(False)
+            except AttributeError:
+                pass
 
     def set_url(self, url: str) -> None:
         if url == self._url:
@@ -40,6 +66,7 @@ class CoverArt(Gtk.Frame):
 
         def apply(texture) -> None:
             if texture is not None and self._url == url:
+                self._configure_picture(self._picture)
                 self._picture.set_paintable(texture)
                 self.set_child(self._picture)
 

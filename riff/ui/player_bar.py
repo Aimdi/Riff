@@ -19,15 +19,26 @@ from .widgets import (
 )
 
 
+def _one_line(text: str) -> str:
+    """Collapse newlines/whitespace so metadata never wraps the bar taller."""
+    return " ".join((text or "").split())
+
+
 def _now_link(css: list[str], max_chars: int) -> tuple[Gtk.Button, Gtk.Label]:
     """Flat text button that looks like a label; used for clickable metadata."""
     btn = Gtk.Button()
     btn.add_css_class("flat")
     btn.add_css_class("riff-now-link")
     btn.set_halign(Gtk.Align.START)
+    btn.set_valign(Gtk.Align.CENTER)
     btn.set_has_frame(False)
+    btn.set_vexpand(False)
     label = _ellipsized("", css)
     label.set_max_width_chars(max_chars)
+    label.set_width_chars(min(12, max_chars))
+    label.set_single_line_mode(True)
+    label.set_wrap(False)
+    label.set_lines(1)
     btn.set_child(label)
     return btn, label
 
@@ -41,9 +52,13 @@ class PlayerBar(Gtk.Box):
         self._current: Track | None = None
 
         self.add_css_class("riff-player-bar")
+        # Never grow with tall album art or multi-line titles.
+        self.set_vexpand(False)
+        self.set_valign(Gtk.Align.END)
 
         # -- seek row ------------------------------------------------------
         seek_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        seek_row.set_vexpand(False)
         seek_row.set_margin_start(12)
         seek_row.set_margin_end(12)
         seek_row.set_margin_top(4)
@@ -67,6 +82,7 @@ class PlayerBar(Gtk.Box):
 
         # -- main row ------------------------------------------------------
         row = Gtk.CenterBox()
+        row.set_vexpand(False)
         row.set_margin_start(12)
         row.set_margin_end(12)
         row.set_margin_top(2)
@@ -74,11 +90,15 @@ class PlayerBar(Gtk.Box):
 
         # left: now playing (title → album/single, artist → artist page)
         now = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        now.set_vexpand(False)
+        now.set_valign(Gtk.Align.CENTER)
         self.art = CoverArt(52)
         self.art_btn = Gtk.Button()
         self.art_btn.add_css_class("flat")
         self.art_btn.add_css_class("riff-cover-link")
         self.art_btn.set_has_frame(False)
+        self.art_btn.set_valign(Gtk.Align.CENTER)
+        self.art_btn.set_vexpand(False)
         self.art_btn.set_child(self.art)
         self.art_btn.set_tooltip_text("Go to album")
         self.art_btn.connect("clicked", self._on_title_clicked)
@@ -86,6 +106,9 @@ class PlayerBar(Gtk.Box):
 
         text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         text.set_valign(Gtk.Align.CENTER)
+        text.set_vexpand(False)
+        text.set_hexpand(False)
+        text.set_size_request(160, -1)
         self.title_btn, self.title_label = _now_link(["heading"], 28)
         self.title_btn.set_tooltip_text("Go to album")
         self.title_btn.connect("clicked", self._on_title_clicked)
@@ -200,8 +223,10 @@ class PlayerBar(Gtk.Box):
                                        on_favorite=self._on_favorite)
         self.track_menu_btn.set_menu_model(menu)
         self.track_menu_btn.insert_action_group("trk", group)
-        self.title_label.set_label(track.title)
-        self.artist_label.set_label(track.artist)
+        title = _one_line(track.title) or "Unknown"
+        artist = _one_line(track.artist)
+        self.title_label.set_label(title)
+        self.artist_label.set_label(artist)
         self.art.set_url(track.thumbnail)
         self.seek_scale.set_range(0, max(track.duration, 1))
         self.seek_scale.set_value(0)
@@ -212,12 +237,13 @@ class PlayerBar(Gtk.Box):
         self._set_link_active(self.title_btn, has_album)
         self._set_link_active(self.art_btn, has_album)
         self._set_link_active(self.artist_btn, has_artist)
-        self.title_btn.set_tooltip_text(
-            "Go to album" if has_album else "Album page not available")
-        self.art_btn.set_tooltip_text(
-            "Go to album" if has_album else "Album page not available")
+        # Full text in tooltips — labels stay single-line so the bar height is fixed.
+        album_hint = "Go to album" if has_album else "Album page not available"
+        artist_hint = "Go to artist" if has_artist else "Artist page not available"
+        self.title_btn.set_tooltip_text(f"{title}\n{album_hint}")
+        self.art_btn.set_tooltip_text(f"{title}\n{album_hint}")
         self.artist_btn.set_tooltip_text(
-            "Go to artist" if has_artist else "Artist page not available")
+            f"{artist}\n{artist_hint}" if artist else artist_hint)
 
     @staticmethod
     def _set_link_active(btn: Gtk.Button, active: bool) -> None:

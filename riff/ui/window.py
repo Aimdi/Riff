@@ -45,12 +45,24 @@ CSS = b"""
     background-color: @headerbar_bg_color;
     border-top: 1px solid @borders;
 }
+/* Keep cover tiles from growing with huge YouTube textures. */
+.riff-cover {
+    min-width: 0;
+    min-height: 0;
+}
+.riff-cover picture {
+    min-width: 0;
+    min-height: 0;
+}
 /* Now-playing title/artist look like plain text but act as links. */
 button.riff-now-link {
     padding: 0;
     min-height: 0;
     min-width: 0;
     border-radius: 0;
+}
+button.riff-now-link label {
+    padding: 0;
 }
 button.riff-now-link:hover label {
     opacity: 0.75;
