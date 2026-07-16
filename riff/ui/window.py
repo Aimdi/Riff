@@ -831,19 +831,7 @@ class MainWindow(Adw.ApplicationWindow):
                         "Install the local model in Settings → AI Mix first")
                     self.show_settings()
                 return None
-            # Ensure the daemon is up (cheap if already running).
-            try:
-                local_ai.ensure_server()
-            except Exception as exc:  # noqa: BLE001
-                if interactive:
-                    self.toast(f"Couldn't start local AI: {exc}")
-                return None
-            return {
-                "provider": "openai",  # same chat-completions path
-                "base_url": local_ai.OPENAI_COMPAT_BASE,
-                "key": "",
-                "model": local_ai.MODEL_ID,
-            }
+            return {"provider": "local"}
         if provider == "openai":
             model = str(config.settings.get("openai_model", "") or "")
             if not model:
@@ -885,7 +873,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.refresh_ai_mix(interactive=False)
 
     def refresh_ai_mix(self, interactive: bool = True) -> None:
-        from ..core import ai
+        from ..core import ai, local_ai
 
         cfg = self._ai_provider_config(interactive)
         if cfg is None:
@@ -938,7 +926,13 @@ class MainWindow(Adw.ApplicationWindow):
             }
             set_status("Analyzing your taste and curating songs…\n"
                        "(this can take up to a minute)")
-            if cfg["provider"] == "openai":
+            if cfg["provider"] == "local":
+                set_status(
+                    "Running the on-device model…\n"
+                    "(first run loads it into memory — can take a minute)")
+                suggestions = local_ai.suggest_songs(
+                    recent, favorites, **context)
+            elif cfg["provider"] == "openai":
                 suggestions = ai.suggest_songs_openai(
                     cfg["base_url"], cfg["key"], cfg["model"],
                     recent, favorites, **context)

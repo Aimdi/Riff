@@ -149,7 +149,8 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.local_group = Adw.PreferencesGroup()
         self.local_group.set_title("Local model")
         self.local_group.set_description(
-            f"Riff uses {local_ai.MODEL_LABEL} via Ollama — "
+            f"Riff downloads {local_ai.MODEL_LABEL} onto this PC and runs it "
+            f"inside the app — no Ollama, no background server. "
             f"{local_ai.MODEL_WHY}")
 
         self.local_status_row = Adw.ActionRow()
@@ -254,11 +255,12 @@ class SettingsDialog(Adw.PreferencesDialog):
                 self.local_install_btn.set_sensitive(False)
                 self.local_install_btn.remove_css_class("suggested-action")
             else:
-                label = "Install"
-                if st.ollama_bin and st.server_up and not st.model_ready:
+                if st.runtime_ready and not st.model_ready:
                     label = f"Download model ({local_ai.MODEL_SIZE_HINT})"
-                elif st.ollama_bin and not st.server_up:
-                    label = "Start & download"
+                elif st.model_ready and not st.runtime_ready:
+                    label = "Install engine"
+                else:
+                    label = f"Install ({local_ai.MODEL_SIZE_HINT})"
                 self.local_install_btn.set_label(label)
                 self.local_install_btn.set_sensitive(True)
                 self.local_install_btn.add_css_class("suggested-action")
@@ -278,11 +280,7 @@ class SettingsDialog(Adw.PreferencesDialog):
         provider = _PROVIDERS[row.get_selected()]
         config.settings.set("ai_provider", provider)
         if provider == "local":
-            # Point OpenAI-compat fields at Ollama so a later switch to
-            # "OpenAI-compatible" still works if the user wants to tweak.
             local_ai.apply_local_settings()
-            # apply_local_settings sets provider again; keep combo in sync
-            config.settings.set("ai_provider", "local")
         self._refresh_provider_visibility()
         if provider == "local":
             self._refresh_local_status()
@@ -343,7 +341,7 @@ class SettingsDialog(Adw.PreferencesDialog):
             dialog.close()
             self._refresh_local_status()
             self.window.toast(
-                f"{local_ai.MODEL_LABEL} ready — AI Mix can use it offline")
+                f"{local_ai.MODEL_LABEL} ready — AI Mix runs fully on-device")
 
         def fail(exc: Exception) -> None:
             self._installing = False

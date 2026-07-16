@@ -1,13 +1,11 @@
-"""Local AI for AI Mix — Ollama + a model Riff chooses for you.
+"""Local AI for AI Mix — one GGUF model, loaded in-process.
 
-Design goals (from product intent):
-- One good default, no model shopping
-- Small enough for a laptop (~2 GB), not glacial on CPU
-- One-button install from Settings
-- Private: nothing leaves the machine once installed
+No Ollama, no background server. Install downloads:
+  1. a private Python venv with ``llama-cpp-python``
+  2. a small GGUF Riff chose for you
 
-We use Ollama because it is free, well-packaged on Arch/CachyOS, and speaks
-the same OpenAI-compatible API AI Mix already uses.
+Inference loads the model into Riff's process (or a short-lived helper
+process using that venv) only while AI Mix runs.
 """
 
 from __future__ import annotations
@@ -15,300 +13,322 @@ from __future__ import annotations
 import json
 import logging
 import os
-import platform
 import shutil
 import subprocess
-import tarfile
-import tempfile
-import time
+import sys
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
 from .. import config
+from . import ai as ai_mod
+from .models import Track
 
 log = logging.getLogger("riff.local_ai")
 
-# Riff's pick: strong instruction-following / JSON for the size, ~1.9 GB.
-# Tag is stable on ollama.com/library/qwen2.5.
-MODEL_ID = "qwen2.5:3b"
-MODEL_LABEL = "Qwen 2.5 · 3B"
-MODEL_SIZE_HINT = "~2 GB"
+# Riff's pick: small, instruct-tuned, solid JSON for its size.
+# Q4_K_M quant ≈ 1 GB on disk, ~1.5 GB RAM — fine on a laptop CPU.
+MODEL_FILENAME = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+MODEL_LABEL = "Qwen 2.5 · 1.5B"
+MODEL_SIZE_HINT = "~1 GB"
 MODEL_WHY = (
-    "Small enough for a laptop, fast enough for AI Mix, good at following "
-    "JSON instructions. Riff picks this for you — no model shopping."
+    "A small on-device model — no account, no server, nothing leaves your "
+    "PC. Riff picks this size so install and AI Mix stay practical."
+)
+# Official Qwen GGUF on Hugging Face (LFS redirect works with urllib).
+MODEL_URL = (
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
+    + MODEL_FILENAME
 )
 
-OLLAMA_HOST = "127.0.0.1"
-OLLAMA_PORT = 11434
-OLLAMA_BASE = f"http://{OLLAMA_HOST}:{OLLAMA_PORT}"
-OPENAI_COMPAT_BASE = f"{OLLAMA_BASE}/v1"
+_MODELS_DIR = os.path.join(config.DATA_DIR, "models")
+_MODEL_PATH = os.path.join(_MODELS_DIR, MODEL_FILENAME)
+_VENV_DIR = os.path.join(config.DATA_DIR, "ai-venv")
+_VENV_PY = os.path.join(
+    _VENV_DIR, "bin", "python" if os.name != "nt" else "python.exe")
 
-# User-local Ollama install (no sudo). System packages take precedence.
-_RIFF_OLLAMA_DIR = os.path.join(config.DATA_DIR, "ollama")
-_RIFF_OLLAMA_BIN = os.path.join(_RIFF_OLLAMA_DIR, "bin", "ollama")
-_RIFF_OLLAMA_MODELS = os.path.join(_RIFF_OLLAMA_DIR, "models")
-
-_DOWNLOAD_URLS = {
-    "x86_64": "https://ollama.com/download/ollama-linux-amd64.tgz",
-    "amd64": "https://ollama.com/download/ollama-linux-amd64.tgz",
-    "aarch64": "https://ollama.com/download/ollama-linux-arm64.tgz",
-    "arm64": "https://ollama.com/download/ollama-linux-arm64.tgz",
-}
-
-_serve_proc: subprocess.Popen | None = None
+# Kept alive for the process after first AI Mix (cold load is the slow part).
+_llm = None
 
 
 @dataclass(frozen=True)
 class LocalAiStatus:
     """Snapshot for the Settings UI."""
 
-    ollama_bin: str | None
-    server_up: bool
-    model_ready: bool
+    runtime_ready: bool  # llama-cpp-python importable from the venv
+    model_ready: bool    # GGUF file present
     detail: str
 
     @property
     def ready(self) -> bool:
-        return bool(self.ollama_bin and self.server_up and self.model_ready)
+        return self.runtime_ready and self.model_ready
 
 
-def ollama_env() -> dict[str, str]:
-    """Environment for riff-managed Ollama (models stay under XDG data)."""
-    env = os.environ.copy()
-    env["OLLAMA_HOST"] = f"{OLLAMA_HOST}:{OLLAMA_PORT}"
-    # Always pin models dir when we own the binary; also fine for system ollama
-    # when the user never set OLLAMA_MODELS themselves.
-    if os.path.isfile(_RIFF_OLLAMA_BIN) or not env.get("OLLAMA_MODELS"):
-        env["OLLAMA_MODELS"] = _RIFF_OLLAMA_MODELS
-    return env
+def model_path() -> str:
+    return _MODEL_PATH
 
 
-def find_ollama() -> str | None:
-    """Path to an ollama binary, or None."""
-    if os.path.isfile(_RIFF_OLLAMA_BIN) and os.access(_RIFF_OLLAMA_BIN, os.X_OK):
-        return _RIFF_OLLAMA_BIN
-    return shutil.which("ollama")
-
-
-def server_up(timeout: float = 1.5) -> bool:
+def model_file_ready() -> bool:
     try:
-        with urllib.request.urlopen(f"{OLLAMA_BASE}/api/tags", timeout=timeout) as resp:
-            return 200 <= resp.status < 300
-    except Exception:  # noqa: BLE001
+        return os.path.isfile(_MODEL_PATH) and os.path.getsize(_MODEL_PATH) > 50_000_000
+    except OSError:
         return False
 
 
-def list_models() -> list[str]:
-    """Installed model names (e.g. ``qwen2.5:3b``). Empty if server down."""
+def runtime_ready() -> bool:
+    """True when the riff ai-venv can import llama_cpp."""
+    if not os.path.isfile(_VENV_PY):
+        return False
     try:
-        with urllib.request.urlopen(f"{OLLAMA_BASE}/api/tags", timeout=5) as resp:
-            data = json.load(resp)
-    except Exception:  # noqa: BLE001
-        return []
-    out = []
-    for m in data.get("models") or []:
-        name = m.get("name") or m.get("model") or ""
-        if name:
-            out.append(name)
-    return out
-
-
-def model_installed(model: str = MODEL_ID) -> bool:
-    """True if ``model`` is present (exact tag or a longer Ollama name)."""
-    for name in list_models():
-        if name == model or name.startswith(model + "-") or name.startswith(model + "@"):
-            return True
-    return False
+        subprocess.run(
+            [_VENV_PY, "-c", "import llama_cpp"],
+            check=True,
+            capture_output=True,
+            timeout=60,
+        )
+        return True
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+        return False
 
 
 def status() -> LocalAiStatus:
-    binary = find_ollama()
-    up = server_up()
-    ready = bool(up and model_installed())
-    if not binary:
-        detail = "Ollama is not installed yet"
-    elif not up:
-        detail = "Ollama is installed but not running"
-    elif not ready:
-        detail = f"{MODEL_LABEL} is not downloaded yet ({MODEL_SIZE_HINT})"
+    has_runtime = runtime_ready()
+    has_model = model_file_ready()
+    if has_runtime and has_model:
+        detail = f"Ready — {MODEL_LABEL} on this machine (no server)"
+    elif not has_runtime and not has_model:
+        detail = (
+            f"Not installed — one click downloads the engine + "
+            f"{MODEL_LABEL} ({MODEL_SIZE_HINT})"
+        )
+    elif not has_runtime:
+        detail = "Model file present, but the local engine is not installed yet"
     else:
-        detail = f"Ready — {MODEL_LABEL} on this machine"
+        detail = f"{MODEL_LABEL} not downloaded yet ({MODEL_SIZE_HINT})"
     return LocalAiStatus(
-        ollama_bin=binary, server_up=up, model_ready=ready, detail=detail)
-
-
-def install_ollama_binary(progress=None) -> str:
-    """Download Ollama into the user data dir (no sudo). Returns binary path.
-
-    ``progress(message: str)`` is optional and called from this thread.
-    """
-    def report(msg: str) -> None:
-        log.info("%s", msg)
-        if progress:
-            progress(msg)
-
-    machine = platform.machine().lower()
-    url = _DOWNLOAD_URLS.get(machine)
-    if not url:
-        raise RuntimeError(
-            f"No Ollama build for this CPU ({machine}). "
-            "Install Ollama from https://ollama.com and try again.")
-
-    os.makedirs(_RIFF_OLLAMA_DIR, exist_ok=True)
-    report("Downloading Ollama…")
-    with tempfile.TemporaryDirectory(prefix="riff-ollama-") as tmp:
-        tgz = os.path.join(tmp, "ollama.tgz")
-        _download(url, tgz, progress)
-        report("Installing Ollama…")
-        with tarfile.open(tgz, "r:gz") as tar:
-            # tarball usually contains a single `ollama` binary at root or bin/
-            try:
-                tar.extractall(tmp, filter="data")
-            except TypeError:
-                tar.extractall(tmp)
-        binary_src = None
-        for root, _dirs, files in os.walk(tmp):
-            if "ollama" in files:
-                candidate = os.path.join(root, "ollama")
-                if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-                    binary_src = candidate
-                    break
-                if os.path.isfile(candidate):
-                    binary_src = candidate
-                    break
-        if binary_src is None:
-            # some archives are just the binary named differently
-            raise RuntimeError("Downloaded Ollama archive looked unexpected")
-        dest_dir = os.path.dirname(_RIFF_OLLAMA_BIN)
-        os.makedirs(dest_dir, exist_ok=True)
-        shutil.copy2(binary_src, _RIFF_OLLAMA_BIN)
-        os.chmod(_RIFF_OLLAMA_BIN, 0o755)
-    report("Ollama installed")
-    return _RIFF_OLLAMA_BIN
-
-
-def _download(url: str, dest: str, progress=None) -> None:
-    req = urllib.request.Request(url, headers={"User-Agent": "Riff-Player"})
-    with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as out:
-        total = int(resp.headers.get("Content-Length") or 0)
-        read = 0
-        while True:
-            chunk = resp.read(1024 * 256)
-            if not chunk:
-                break
-            out.write(chunk)
-            read += len(chunk)
-            if progress and total:
-                pct = min(99, int(100 * read / total))
-                progress(f"Downloading Ollama… {pct}%")
-
-
-def ensure_server(progress=None) -> None:
-    """Make sure ``ollama serve`` is reachable; start it if needed."""
-    def report(msg: str) -> None:
-        log.info("%s", msg)
-        if progress:
-            progress(msg)
-
-    if server_up():
-        return
-
-    binary = find_ollama()
-    if not binary:
-        binary = install_ollama_binary(progress=progress)
-
-    report("Starting Ollama…")
-    global _serve_proc
-    # If a previous child died, clear it.
-    if _serve_proc is not None and _serve_proc.poll() is not None:
-        _serve_proc = None
-
-    if _serve_proc is None:
-        os.makedirs(_RIFF_OLLAMA_MODELS, exist_ok=True)
-        try:
-            _serve_proc = subprocess.Popen(
-                [binary, "serve"],
-                env=ollama_env(),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
-        except OSError as exc:
-            raise RuntimeError(f"Couldn't start Ollama: {exc}") from exc
-
-    # Wait for readiness
-    for _ in range(40):
-        if server_up():
-            return
-        if _serve_proc is not None and _serve_proc.poll() is not None:
-            raise RuntimeError(
-                "Ollama exited immediately — is another install conflicting "
-                f"on port {OLLAMA_PORT}?")
-        time.sleep(0.25)
-    raise RuntimeError("Ollama did not become ready in time")
-
-
-def pull_model(model: str = MODEL_ID, progress=None) -> None:
-    """Pull ``model`` via the Ollama HTTP API (streaming progress)."""
-    def report(msg: str) -> None:
-        log.info("%s", msg)
-        if progress:
-            progress(msg)
-
-    ensure_server(progress=progress)
-    if model_installed(model):
-        report(f"{model} already installed")
-        return
-
-    report(f"Downloading {MODEL_LABEL} ({MODEL_SIZE_HINT})…")
-    body = json.dumps({"name": model, "stream": True}).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA_BASE}/api/pull",
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            for raw in resp:
-                line = raw.decode("utf-8", errors="replace").strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except ValueError:
-                    continue
-                status = event.get("status") or ""
-                completed = event.get("completed")
-                total = event.get("total")
-                if completed and total:
-                    pct = min(99, int(100 * completed / total))
-                    report(f"{status or 'Downloading'}… {pct}%")
-                elif status:
-                    report(status)
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError(f"Model download failed (HTTP {exc.code})") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"Couldn't reach Ollama: {exc.reason}") from exc
-
-    if not model_installed(model):
-        # tags endpoint can lag briefly after pull
-        time.sleep(0.5)
-    if not model_installed(model):
-        raise RuntimeError(f"Download finished but {model} is not listed yet")
-    report(f"{MODEL_LABEL} is ready")
-
-
-def install_local_ai(progress=None) -> LocalAiStatus:
-    """Full one-shot: Ollama binary + server + recommended model."""
-    pull_model(MODEL_ID, progress=progress)
-    return status()
+        runtime_ready=has_runtime, model_ready=has_model, detail=detail)
 
 
 def apply_local_settings() -> None:
-    """Point AI Mix settings at the local stack."""
     config.settings.set("ai_provider", "local")
-    config.settings.set("openai_base_url", OPENAI_COMPAT_BASE)
-    config.settings.set("openai_model", MODEL_ID)
-    # Local Ollama does not need a key; leave openai_api_key alone.
+
+
+def _download(url: str, dest: str, progress=None, label: str = "Downloading") -> None:
+    os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+    tmp = dest + ".part"
+    req = urllib.request.Request(url, headers={"User-Agent": "Riff-Player"})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp, open(tmp, "wb") as out:
+            total = int(resp.headers.get("Content-Length") or 0)
+            read = 0
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                out.write(chunk)
+                read += len(chunk)
+                if progress and total:
+                    pct = min(99, int(100 * read / total))
+                    mb = read / (1024 * 1024)
+                    progress(f"{label}… {pct}% ({mb:.0f} MB)")
+                elif progress and read and read % (10 * 1024 * 1024) < 256 * 1024:
+                    progress(f"{label}… {read / (1024 * 1024):.0f} MB")
+    except urllib.error.HTTPError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError(f"Download failed (HTTP {exc.code})") from exc
+    except urllib.error.URLError as exc:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise RuntimeError(f"Download failed: {exc.reason}") from exc
+    os.replace(tmp, dest)
+
+
+def ensure_runtime(progress=None) -> None:
+    """Create the private venv and install llama-cpp-python if needed."""
+    def report(msg: str) -> None:
+        log.info("%s", msg)
+        if progress:
+            progress(msg)
+
+    if runtime_ready():
+        return
+
+    report("Setting up local AI engine…")
+    os.makedirs(config.DATA_DIR, exist_ok=True)
+    if not os.path.isfile(_VENV_PY):
+        subprocess.run(
+            [sys.executable, "-m", "venv", _VENV_DIR],
+            check=True,
+            capture_output=True,
+            timeout=120,
+        )
+
+    # Prefer prebuilt CPU wheels when available; fall back to default index.
+    pip = [_VENV_PY, "-m", "pip", "install", "--upgrade", "pip", "wheel"]
+    report("Updating pip…")
+    subprocess.run(pip, check=True, capture_output=True, timeout=300)
+
+    report("Installing llama.cpp bindings (CPU)… this may take a minute")
+    install_cmds = [
+        [
+            _VENV_PY, "-m", "pip", "install", "--upgrade",
+            "llama-cpp-python",
+            "--extra-index-url",
+            "https://abetlen.github.io/llama-cpp-python/whl/cpu",
+        ],
+        [
+            _VENV_PY, "-m", "pip", "install", "--upgrade", "llama-cpp-python",
+        ],
+    ]
+    last_err = None
+    for cmd in install_cmds:
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, timeout=1800)
+            last_err = None
+            break
+        except subprocess.CalledProcessError as exc:
+            last_err = exc
+            log.warning("pip install failed: %s", exc.stderr[-500:] if exc.stderr else exc)
+        except subprocess.TimeoutExpired as exc:
+            last_err = exc
+
+    if last_err is not None or not runtime_ready():
+        raise RuntimeError(
+            "Couldn't install the local AI engine (llama-cpp-python). "
+            "You need a working C++ toolchain, or try: "
+            f"{_VENV_PY} -m pip install llama-cpp-python"
+        ) from last_err
+
+    report("Local AI engine ready")
+
+
+def ensure_model(progress=None) -> None:
+    def report(msg: str) -> None:
+        log.info("%s", msg)
+        if progress:
+            progress(msg)
+
+    if model_file_ready():
+        return
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    report(f"Downloading {MODEL_LABEL} ({MODEL_SIZE_HINT})…")
+    _download(MODEL_URL, _MODEL_PATH, progress=progress, label=f"Downloading {MODEL_LABEL}")
+    if not model_file_ready():
+        raise RuntimeError("Model download finished but the file looks incomplete")
+    report(f"{MODEL_LABEL} downloaded")
+
+
+def install_local_ai(progress=None) -> LocalAiStatus:
+    """One-shot: engine + model file. No server."""
+    ensure_runtime(progress=progress)
+    ensure_model(progress=progress)
+    return status()
+
+
+def _site_packages() -> str | None:
+    if not os.path.isdir(_VENV_DIR):
+        return None
+    lib = os.path.join(_VENV_DIR, "lib")
+    if not os.path.isdir(lib):
+        return None
+    for name in os.listdir(lib):
+        if name.startswith("python"):
+            site = os.path.join(lib, name, "site-packages")
+            if os.path.isdir(site):
+                return site
+    return None
+
+
+def _load_llm(progress=None):
+    """Import llama_cpp from the riff venv and load the GGUF once."""
+    global _llm
+    if _llm is not None:
+        return _llm
+
+    if not model_file_ready():
+        raise RuntimeError("Local model is not installed — use Settings → Install")
+    site = _site_packages()
+    if not site:
+        raise RuntimeError("Local AI engine is not installed — use Settings → Install")
+    if site not in sys.path:
+        sys.path.insert(0, site)
+
+    try:
+        from llama_cpp import Llama
+    except ImportError as exc:
+        raise RuntimeError(
+            "Local AI engine missing — open Settings and press Install"
+        ) from exc
+
+    if progress:
+        progress("Loading model into memory…")
+    log.info("loading local model from %s", _MODEL_PATH)
+    n_threads = max(1, (os.cpu_count() or 4) - 1)
+    _llm = Llama(
+        model_path=_MODEL_PATH,
+        n_ctx=4096,
+        n_threads=n_threads,
+        n_gpu_layers=0,  # pure CPU; GPU would need a CUDA build
+        verbose=False,
+    )
+    return _llm
+
+
+def unload() -> None:
+    """Drop the in-memory model (frees RAM). Next AI Mix reloads it."""
+    global _llm
+    _llm = None
+
+
+def suggest_songs(recent: list[Track], favorites: list[Track],
+                  count: int = 20, **context) -> list[tuple[str, str]]:
+    """Blocking in-process generation. Same return shape as cloud providers."""
+    llm = _load_llm()
+    system = (
+        ai_mod._SYSTEM
+        + ' Respond ONLY with a JSON object of the form '
+          '{"songs": [{"title": "...", "artist": "..."}]} — no other text.'
+    )
+    # Slightly fewer songs on-device keeps latency and quality better.
+    count = min(count, 16)
+    user = ai_mod.build_prompt(recent, favorites, count, **context)
+
+    try:
+        result = llm.create_chat_completion(
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            temperature=0.7,
+            max_tokens=2048,
+            # stop if the model starts babbling after JSON
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.exception("local generation failed")
+        raise RuntimeError(f"Local model failed: {exc}") from exc
+
+    try:
+        text = result["choices"][0]["message"]["content"] or ""
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("Unexpected response from the local model") from exc
+
+    try:
+        return ai_mod.parse_suggestions(text)
+    except (ValueError, KeyError) as exc:
+        raise RuntimeError(
+            "Couldn't parse the local model's suggestions — try again"
+        ) from exc
+
+
+def remove_install() -> None:
+    """Optional cleanup: delete model + venv (not wired in UI yet)."""
+    unload()
+    if os.path.isfile(_MODEL_PATH):
+        os.remove(_MODEL_PATH)
+    if os.path.isdir(_VENV_DIR):
+        shutil.rmtree(_VENV_DIR, ignore_errors=True)

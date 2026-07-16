@@ -1,4 +1,4 @@
-"""Unit tests for local AI helpers (no network, no real Ollama)."""
+"""Unit tests for local AI helpers (no network, no real model load)."""
 
 from __future__ import annotations
 
@@ -8,44 +8,34 @@ from riff.core import local_ai
 
 
 def test_model_constants():
-    assert local_ai.MODEL_ID
-    assert ":" in local_ai.MODEL_ID  # ollama-style tag
+    assert local_ai.MODEL_FILENAME.endswith(".gguf")
     assert local_ai.MODEL_LABEL
-    assert local_ai.OPENAI_COMPAT_BASE.endswith("/v1")
-
-
-def test_model_installed_matches_tags():
-    with mock.patch.object(local_ai, "list_models", return_value=[
-        "qwen2.5:3b", "llama3.2:1b",
-    ]):
-        assert local_ai.model_installed("qwen2.5:3b") is True
-        assert local_ai.model_installed("llama3.2:1b") is True
-        assert local_ai.model_installed("missing:7b") is False
-
-
-def test_model_installed_prefix_variants():
-    with mock.patch.object(local_ai, "list_models", return_value=[
-        "qwen2.5:3b-instruct-q4_K_M",
-    ]):
-        assert local_ai.model_installed("qwen2.5:3b") is True
+    assert local_ai.MODEL_URL.startswith("https://")
+    assert local_ai.MODEL_FILENAME in local_ai.MODEL_URL
 
 
 def test_status_not_installed():
-    with mock.patch.object(local_ai, "find_ollama", return_value=None), \
-         mock.patch.object(local_ai, "server_up", return_value=False), \
-         mock.patch.object(local_ai, "model_installed", return_value=False):
+    with mock.patch.object(local_ai, "runtime_ready", return_value=False), \
+         mock.patch.object(local_ai, "model_file_ready", return_value=False):
         st = local_ai.status()
         assert not st.ready
         assert "not installed" in st.detail.lower()
 
 
 def test_status_ready():
-    with mock.patch.object(local_ai, "find_ollama", return_value="/usr/bin/ollama"), \
-         mock.patch.object(local_ai, "server_up", return_value=True), \
-         mock.patch.object(local_ai, "model_installed", return_value=True):
+    with mock.patch.object(local_ai, "runtime_ready", return_value=True), \
+         mock.patch.object(local_ai, "model_file_ready", return_value=True):
         st = local_ai.status()
         assert st.ready
         assert "Ready" in st.detail
+
+
+def test_status_model_only():
+    with mock.patch.object(local_ai, "runtime_ready", return_value=False), \
+         mock.patch.object(local_ai, "model_file_ready", return_value=True):
+        st = local_ai.status()
+        assert not st.ready
+        assert "engine" in st.detail.lower()
 
 
 def test_apply_local_settings(tmp_path, monkeypatch):
@@ -58,5 +48,31 @@ def test_apply_local_settings(tmp_path, monkeypatch):
 
     local_ai.apply_local_settings()
     assert store.get("ai_provider") == "local"
-    assert store.get("openai_model") == local_ai.MODEL_ID
-    assert store.get("openai_base_url") == local_ai.OPENAI_COMPAT_BASE
+
+
+def test_model_file_ready_rejects_tiny_files(tmp_path, monkeypatch):
+    tiny = tmp_path / "tiny.gguf"
+    tiny.write_bytes(b"not a real model")
+    monkeypatch.setattr(local_ai, "_MODEL_PATH", str(tiny))
+    assert local_ai.model_file_ready() is False
+
+
+def test_suggest_songs_parses_llm_output(monkeypatch):
+    class FakeLLM:
+        def create_chat_completion(self, **_kwargs):
+            return {
+                "choices": [{
+                    "message": {
+                        "content": '{"songs": [{"title": "Dreams", '
+                                   '"artist": "Fleetwood Mac"}]}'
+                    }
+                }]
+            }
+
+    monkeypatch.setattr(local_ai, "_load_llm", lambda progress=None: FakeLLM())
+    from riff.core.models import Track
+    songs = local_ai.suggest_songs(
+        [Track(video_id="1", title="A", artists=["B"])],
+        [],
+    )
+    assert songs == [("Dreams", "Fleetwood Mac")]

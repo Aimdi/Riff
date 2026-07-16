@@ -8,7 +8,7 @@
 # the preinstalled AUR helper:   paru -S python-ytmusicapi
 
 pkgname=riff-player
-pkgver=0.9.0
+pkgver=0.9.1
 pkgrel=1
 pkgdesc="Native YouTube Music player (GTK4 + libadwaita + mpv)"
 arch=('any')
@@ -26,7 +26,6 @@ depends=(
 )
 optdepends=(
   'python-anthropic: AI Mix — Claude-curated song suggestions'
-  'ollama: system Ollama for local AI Mix (Riff can also install its own copy)'
 )
 makedepends=(
   'python-build'
