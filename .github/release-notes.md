@@ -1,3 +1,7 @@
+## Riff 0.10.1 🎵
+
+**Clickable now-playing** — tap the song title or cover to open the album/single, tap the artist name to open the artist page (when YouTube Music provides those links).
+
 ## Riff 0.10.0 🎵
 
 **Playlist folders** (Spotify-style) — create folders from the sidebar **＋ New** menu, nest playlists inside, expand/collapse in the sidebar. Move playlists between folders from the Playlists page.

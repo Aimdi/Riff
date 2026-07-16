@@ -45,6 +45,26 @@ CSS = b"""
     background-color: @headerbar_bg_color;
     border-top: 1px solid @borders;
 }
+/* Now-playing title/artist look like plain text but act as links. */
+button.riff-now-link {
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+    border-radius: 0;
+}
+button.riff-now-link:hover label {
+    opacity: 0.75;
+}
+button.riff-now-link.riff-now-link-active:hover label {
+    color: @accent_color;
+    opacity: 1;
+}
+button.riff-cover-link {
+    padding: 0;
+    min-height: 0;
+    min-width: 0;
+    border-radius: 8px;
+}
 .riff-card {
     padding: 8px;
     border-radius: 12px;

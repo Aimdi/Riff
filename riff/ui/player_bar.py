@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from gi.repository import GLib, Gtk
+from gi.repository import Gdk, GLib, Gtk
 
 from .. import config
-from ..core.models import format_duration
+from ..core.models import Track, format_duration
 from ..core.player import STATE_LOADING, STATE_PLAYING
 from ..core.queue import REPEAT_ALL, REPEAT_ONE
 from . import iconutil
@@ -19,12 +19,26 @@ from .widgets import (
 )
 
 
+def _now_link(css: list[str], max_chars: int) -> tuple[Gtk.Button, Gtk.Label]:
+    """Flat text button that looks like a label; used for clickable metadata."""
+    btn = Gtk.Button()
+    btn.add_css_class("flat")
+    btn.add_css_class("riff-now-link")
+    btn.set_halign(Gtk.Align.START)
+    btn.set_has_frame(False)
+    label = _ellipsized("", css)
+    label.set_max_width_chars(max_chars)
+    btn.set_child(label)
+    return btn, label
+
+
 class PlayerBar(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.window = window
         self.service = window.service
         self._seeking = False
+        self._current: Track | None = None
 
         self.add_css_class("riff-player-bar")
 
@@ -58,18 +72,29 @@ class PlayerBar(Gtk.Box):
         row.set_margin_top(2)
         row.set_margin_bottom(8)
 
-        # left: now playing
+        # left: now playing (title → album/single, artist → artist page)
         now = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         self.art = CoverArt(52)
-        now.append(self.art)
-        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self.art_btn = Gtk.Button()
+        self.art_btn.add_css_class("flat")
+        self.art_btn.add_css_class("riff-cover-link")
+        self.art_btn.set_has_frame(False)
+        self.art_btn.set_child(self.art)
+        self.art_btn.set_tooltip_text("Go to album")
+        self.art_btn.connect("clicked", self._on_title_clicked)
+        now.append(self.art_btn)
+
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         text.set_valign(Gtk.Align.CENTER)
-        self.title_label = _ellipsized("Not playing", ["heading"])
-        self.title_label.set_max_width_chars(28)
-        self.artist_label = _ellipsized("", ["dim-label", "caption"])
-        self.artist_label.set_max_width_chars(30)
-        text.append(self.title_label)
-        text.append(self.artist_label)
+        self.title_btn, self.title_label = _now_link(["heading"], 28)
+        self.title_btn.set_tooltip_text("Go to album")
+        self.title_btn.connect("clicked", self._on_title_clicked)
+        self.artist_btn, self.artist_label = _now_link(
+            ["dim-label", "caption"], 30)
+        self.artist_btn.set_tooltip_text("Go to artist")
+        self.artist_btn.connect("clicked", self._on_artist_clicked)
+        text.append(self.title_btn)
+        text.append(self.artist_btn)
         now.append(text)
         self.fav_button = heart_button(tooltip="Add to favorites")
         self.fav_button.connect("clicked", self._on_favorite)
@@ -155,6 +180,7 @@ class PlayerBar(Gtk.Box):
     # -- service events ----------------------------------------------------
 
     def _on_track(self, track) -> None:
+        self._current = track
         if track is None:
             self.title_label.set_label("Not playing")
             self.artist_label.set_label("")
@@ -164,6 +190,9 @@ class PlayerBar(Gtk.Box):
             self.dur_label.set_label("0:00")
             self.fav_button.set_sensitive(False)
             self.track_menu_btn.set_sensitive(False)
+            self._set_link_active(self.title_btn, False)
+            self._set_link_active(self.artist_btn, False)
+            self._set_link_active(self.art_btn, False)
             return
         self.fav_button.set_sensitive(True)
         self.track_menu_btn.set_sensitive(True)
@@ -178,6 +207,52 @@ class PlayerBar(Gtk.Box):
         self.seek_scale.set_value(0)
         self.dur_label.set_label(format_duration(track.duration))
         self._update_fav_icon()
+        has_album = bool(track.album_id)
+        has_artist = any(track.artist_ids)
+        self._set_link_active(self.title_btn, has_album)
+        self._set_link_active(self.art_btn, has_album)
+        self._set_link_active(self.artist_btn, has_artist)
+        self.title_btn.set_tooltip_text(
+            "Go to album" if has_album else "Album page not available")
+        self.art_btn.set_tooltip_text(
+            "Go to album" if has_album else "Album page not available")
+        self.artist_btn.set_tooltip_text(
+            "Go to artist" if has_artist else "Artist page not available")
+
+    @staticmethod
+    def _set_link_active(btn: Gtk.Button, active: bool) -> None:
+        """Pointer cursor + hover accent when a navigation target exists."""
+        if active:
+            btn.add_css_class("riff-now-link-active")
+            try:
+                btn.set_cursor(Gdk.Cursor.new_from_name("pointer"))
+            except Exception:  # noqa: BLE001
+                pass
+        else:
+            btn.remove_css_class("riff-now-link-active")
+            try:
+                btn.set_cursor(None)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _on_title_clicked(self, _btn=None) -> None:
+        track = self._current
+        if track is None:
+            return
+        if track.album_id:
+            self.window.open_album(track.album_id)
+        else:
+            self.window.toast("Album page not available for this track")
+
+    def _on_artist_clicked(self, _btn=None) -> None:
+        track = self._current
+        if track is None:
+            return
+        for aid in track.artist_ids:
+            if aid:
+                self.window.open_artist(aid)
+                return
+        self.window.toast("Artist page not available for this track")
 
     def _on_state(self, state: str) -> None:
         icon = ("media-playback-pause-symbolic"
