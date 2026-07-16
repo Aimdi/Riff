@@ -35,6 +35,9 @@ dev = ["pytest"]
 [tool.setuptools.packages.find]
 include = ["riff*"]
 
+[tool.setuptools.package-data]
+riff = ["ui/icons/*.svg", "ui/icons/COPYING"]
+
 [tool.setuptools.dynamic]
 version = { attr = "riff.__version__" }
 

@@ -1,14 +1,8 @@
-## Riff 0.2.0 🎵
+## Riff 0.2.1 🎵
 
-Big discovery + lyrics update, inspired by Snowify:
+Fixes invisible favorite/menu buttons on KDE Plasma (stock CachyOS): the Breeze icon theme lacks several GNOME icon names (`emblem-favorite-symbolic`, `view-more-symbolic`, …), so those buttons rendered blank. Riff now bundles all symbolic icons it uses (from adwaita-icon-theme, LGPL/CC-BY-SA) as a fallback — the system theme still wins when it provides a name.
 
-- **Explore page**: global top songs and public playlists browsable by mood and genre — playlist recommendations without an account
-- **Synced lyrics** from LRCLIB with live line highlighting and click-to-seek (falls back to YouTube Music lyrics)
-- **Follow artists**: Follow button on artist pages; their newest releases appear in a "New from artists you follow" section on Home
-- **Drag & drop queue reordering**
-- Playlist **rename** and cover art on the playlists page
-- New shortcuts: `/` focuses search, `Shift+←/→` seeks ±10s
-
+Includes everything from 0.2.0: Explore page, synced lyrics, artist follows, queue drag-reorder.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

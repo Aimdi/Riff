@@ -10,7 +10,7 @@ import gi
 gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 
-from gi.repository import Adw, Gio, GLib  # noqa: E402
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
 
 from . import APP_ID, config  # noqa: E402
 from .core.api import MusicApi  # noqa: E402
@@ -43,6 +43,7 @@ class RiffApplication(Adw.Application):
             return
 
         config.ensure_dirs()
+        self._register_bundled_icons()
         api = MusicApi()
         library = Library(config.DB_PATH)
         engine = PlayerEngine(dispatcher=_glib_dispatcher)
@@ -57,6 +58,23 @@ class RiffApplication(Adw.Application):
             log.exception("MPRIS unavailable")
         self._install_accels()
         self.window.present()
+
+    def _register_bundled_icons(self) -> None:
+        """Riff bundles the symbolic icons it uses.
+
+        Desktops whose GTK icon theme lacks GNOME icon names (e.g. Breeze on
+        KDE Plasma) would otherwise render blank buttons — the favorite heart
+        and the per-song menu were invisible on stock CachyOS. Icons placed
+        directly on the search path act as a fallback: the active theme still
+        wins when it provides a name.
+        """
+        import os
+
+        icons_dir = os.path.join(os.path.dirname(__file__), "ui", "icons")
+        display = Gdk.Display.get_default()
+        if display is not None and os.path.isdir(icons_dir):
+            theme = Gtk.IconTheme.get_for_display(display)
+            theme.add_search_path(icons_dir)
 
     def _install_accels(self) -> None:
         def add(name: str, cb, *accels: str) -> None:
