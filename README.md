@@ -106,9 +106,13 @@ API key. Stored in `~/.config/riff/settings.json`.
 
 ### AI Mix (optional)
 
-The header menu's **AI Mix** asks an AI model to curate ~20 songs from your
-listening history and favorites, finds them on YouTube Music, and queues
-them. Only song titles/artists are sent; keys are stored locally. Two
+The header menu's **AI Mix** works like a personal Discover Weekly: an AI
+model studies your most-played songs (with play counts), favorites, recent
+listening and followed artists, then curates ~20 songs — mostly inside your
+taste, plus deeper cuts and a few discoveries. The result is saved to a
+**“✨ AI Mix” playlist in the sidebar** and starts playing; run it again any
+time for a fresh mix (it knows what it suggested last time and won't repeat
+it). Only song titles/artists are sent; keys are stored locally. Two
 provider options in Settings:
 
 - **Anthropic (Claude)** — paste an [Anthropic API key](https://platform.claude.com/);

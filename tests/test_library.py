@@ -77,6 +77,19 @@ def test_follows(lib):
     assert len(lib.followed_artists()) == 1
 
 
+def test_find_and_replace_playlist(lib):
+    assert lib.find_playlist("✨ AI Mix") is None
+    pid = lib.create_playlist("✨ AI Mix")
+    assert lib.find_playlist("✨ AI Mix") == pid
+    lib.replace_playlist_tracks(pid, [track(1), track(2)])
+    assert [t.video_id for t in lib.playlist_tracks(pid)] == ["v1", "v2"]
+    # replacing again fully swaps the contents
+    lib.replace_playlist_tracks(pid, [track(3)])
+    assert [t.video_id for t in lib.playlist_tracks(pid)] == ["v3"]
+    lib.replace_playlist_tracks(pid, [])
+    assert lib.playlist_tracks(pid) == []
+
+
 def test_downloads(lib, tmp_path):
     t = track(5)
     path = str(tmp_path / "song.m4a")

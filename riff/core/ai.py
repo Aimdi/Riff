@@ -40,10 +40,23 @@ _SCHEMA = {
 }
 
 _SYSTEM = (
-    "You are a music curator. Given a listener's recent plays and favorites, "
-    "suggest songs they are likely to love. Mix familiar-adjacent picks with "
-    "a few discoveries; avoid suggesting songs already in their history. "
-    "Only suggest real, existing songs."
+    "You are an expert music curator building a personal mix, like a "
+    "world-class radio DJ who knows the listener well.\n"
+    "First, silently analyze the listener's taste from the data: core genres "
+    "and subgenres, eras, moods, energy levels, and how their favorites "
+    "differ from their casual plays (favorites and high play counts weigh "
+    "much more).\n"
+    "Then curate the mix with this structure:\n"
+    "- ~50% taste-adjacent: songs squarely inside their taste they likely "
+    "know of but haven't played here\n"
+    "- ~30% deeper cuts: less obvious songs from artists/scenes/eras they "
+    "already love\n"
+    "- ~20% discoveries: adjacent genres or newer artists they'd plausibly "
+    "adore, connected to their taste\n"
+    "Rules: never repeat anything from their history, favorites, or the "
+    "previous mix; at most 2 songs per artist; order the mix to flow well "
+    "(group compatible moods/energy); only real, existing songs with the "
+    "artist named exactly as released."
 )
 
 
@@ -56,12 +69,27 @@ def _format_tracks(tracks: list[Track], limit: int = 30) -> str:
 
 
 def build_prompt(recent: list[Track], favorites: list[Track],
-                 count: int = 20) -> str:
-    return (
-        f"Recently played:\n{_format_tracks(recent)}\n\n"
-        f"Favorites:\n{_format_tracks(favorites)}\n\n"
-        f"Suggest {count} songs as JSON."
-    )
+                 count: int = 20, *,
+                 most_played: list[tuple[Track, int]] | None = None,
+                 following: list[str] | None = None,
+                 avoid: list[Track] | None = None) -> str:
+    sections = []
+    if most_played:
+        lines = "\n".join(
+            f"- {t.title} — {t.artist or 'Unknown'} ({plays} plays)"
+            for t, plays in most_played[:20])
+        sections.append(f"Most played (strongest signal):\n{lines}")
+    sections.append(f"Favorites:\n{_format_tracks(favorites)}")
+    sections.append(f"Recently played:\n{_format_tracks(recent)}")
+    if following:
+        sections.append("Artists they follow:\n" +
+                        "\n".join(f"- {name}" for name in following[:20]))
+    if avoid:
+        sections.append(
+            "Previous mix (do NOT repeat any of these — this refresh must "
+            f"feel new):\n{_format_tracks(avoid, limit=40)}")
+    sections.append(f"Curate {count} songs as JSON.")
+    return "\n\n".join(sections)
 
 
 def extract_json(text: str) -> str:
@@ -96,7 +124,7 @@ def parse_suggestions(text: str) -> list[tuple[str, str]]:
 
 def suggest_songs_openai(base_url: str, api_key: str, model: str,
                          recent: list[Track], favorites: list[Track],
-                         count: int = 20) -> list[tuple[str, str]]:
+                         count: int = 20, **context) -> list[tuple[str, str]]:
     """Blocking: [(title, artist), …] from any OpenAI-compatible endpoint
     (OpenAI, OpenRouter, Groq, Ollama, LM Studio, …). Raises RuntimeError
     with a user-presentable message on failure."""
@@ -113,7 +141,8 @@ def suggest_songs_openai(base_url: str, api_key: str, model: str,
         "model": model,
         "messages": [
             {"role": "system", "content": system},
-            {"role": "user", "content": build_prompt(recent, favorites, count)},
+            {"role": "user",
+             "content": build_prompt(recent, favorites, count, **context)},
         ],
         "response_format": {"type": "json_object"},
     }
@@ -163,7 +192,7 @@ def suggest_songs_openai(base_url: str, api_key: str, model: str,
 
 
 def suggest_songs(api_key: str, recent: list[Track], favorites: list[Track],
-                  count: int = 20) -> list[tuple[str, str]]:
+                  count: int = 20, **context) -> list[tuple[str, str]]:
     """Blocking: returns [(title, artist), …]. Raises RuntimeError with a
     user-presentable message on failure."""
     try:
@@ -187,7 +216,8 @@ def suggest_songs(api_key: str, recent: list[Track], favorites: list[Track],
             thinking={"type": "adaptive"},
             system=_SYSTEM,
             messages=[{"role": "user",
-                       "content": build_prompt(recent, favorites, count)}],
+                       "content": build_prompt(recent, favorites, count,
+                                               **context)}],
             output_config={"format": {"type": "json_schema",
                                       "schema": _SCHEMA}},
         )

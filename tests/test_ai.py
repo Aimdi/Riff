@@ -24,6 +24,18 @@ def test_build_prompt_handles_empty():
     assert "(none)" in prompt
 
 
+def test_build_prompt_with_context():
+    prompt = build_prompt(
+        [track("A", "B")], [],
+        most_played=[(track("Dreams", "Fleetwood Mac"), 12)],
+        following=["Neil Young"],
+        avoid=[track("Old Man", "Neil Young")],
+    )
+    assert "Dreams — Fleetwood Mac (12 plays)" in prompt
+    assert "Artists they follow" in prompt and "Neil Young" in prompt
+    assert "do NOT repeat" in prompt and "Old Man" in prompt
+
+
 def test_parse_suggestions():
     text = '{"songs": [{"title": "Old Man", "artist": "Neil Young"}, ' \
            '{"title": "", "artist": "Nobody"}, ' \

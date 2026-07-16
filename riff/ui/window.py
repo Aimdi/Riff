@@ -56,6 +56,8 @@ button.dim-label .riff-heart {
 }
 """
 
+AI_MIX_PLAYLIST = "✨ AI Mix"
+
 SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
     ("explore", "Explore", "web-browser-symbolic"),
@@ -524,17 +526,29 @@ class MainWindow(Adw.ApplicationWindow):
                 return
 
         def work():
-            recent = self.library.recent(30)
-            favorites = self.library.favorites()[:30]
+            recent = self.library.recent(40)
+            favorites = self.library.favorites()[:40]
             if not recent and not favorites:
                 raise RuntimeError(
                     "Play or favorite some songs first — AI Mix learns from them")
+            most_played = self.library.most_played(20)
+            following = [f[1] for f in self.library.followed_artists()]
+            prev_id = self.library.find_playlist(AI_MIX_PLAYLIST)
+            previous_mix = (
+                self.library.playlist_tracks(prev_id) if prev_id else [])
+            context = {
+                "most_played": most_played,
+                "following": following,
+                "avoid": previous_mix,
+            }
             if provider == "openai":
                 suggestions = ai.suggest_songs_openai(
-                    base_url, openai_key, model, recent, favorites)
+                    base_url, openai_key, model, recent, favorites, **context)
             else:
-                suggestions = ai.suggest_songs(key, recent, favorites)
-            known = {t.video_id for t in recent}
+                suggestions = ai.suggest_songs(
+                    key, recent, favorites, **context)
+            known = ({t.video_id for t in recent}
+                     | {t.video_id for t in previous_mix})
             tracks, seen = [], set()
             for title, artist in suggestions:
                 try:
@@ -550,10 +564,17 @@ class MainWindow(Adw.ApplicationWindow):
             return tracks
 
         def done(tracks) -> None:
+            pid = self.library.find_playlist(AI_MIX_PLAYLIST)
+            if pid is None:
+                pid = self.library.create_playlist(AI_MIX_PLAYLIST)
+            self.library.replace_playlist_tracks(pid, tracks)
+            self.reload_sidebar_playlists()
             self.service.play_tracks(tracks)
-            self.toast(f"AI Mix: queued {len(tracks)} songs")
+            self.toast(
+                f"AI Mix refreshed: {len(tracks)} songs — saved to "
+                f"“{AI_MIX_PLAYLIST}” in the sidebar")
 
-        self.toast("Creating your AI Mix — this takes a few seconds…")
+        self.toast("Refreshing your AI Mix — this takes a few seconds…")
         run_async(work, done,
                   lambda exc: self.toast(f"AI Mix failed: {exc}"),
                   name="riff-ai-mix")

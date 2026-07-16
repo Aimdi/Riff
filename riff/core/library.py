@@ -173,6 +173,25 @@ class Library:
             ).fetchall()
         return [Track.from_dict(json.loads(r[0])) for r in rows]
 
+    def find_playlist(self, name: str) -> int | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT id FROM playlists WHERE name = ?", (name,)
+            ).fetchone()
+        return row[0] if row else None
+
+    def replace_playlist_tracks(self, playlist_id: int,
+                                tracks: list[Track]) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM playlist_items WHERE playlist_id = ?",
+                (playlist_id,))
+            self._db.executemany(
+                "INSERT INTO playlist_items (playlist_id, position, video_id, track_json) "
+                "VALUES (?,?,?,?)",
+                [(playlist_id, i, t.video_id, json.dumps(t.to_dict()))
+                 for i, t in enumerate(tracks)])
+
     def add_to_playlist(self, playlist_id: int, track: Track) -> None:
         with self._lock, self._db:
             row = self._db.execute(
