@@ -1,4 +1,6 @@
-## Riff 0.1.0 — first release 🎵
+## Riff 0.1.1 🎵
+
+Fixes startup crash on systems with non-English locales (libmpv requires LC_NUMERIC="C"; GTK sets the locale from the environment, so the mpv engine failed to initialize e.g. on German systems).
 
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 

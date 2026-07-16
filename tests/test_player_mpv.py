@@ -3,6 +3,7 @@
 Skipped automatically when libmpv is not installed.
 """
 
+import locale
 import math
 import struct
 import threading
@@ -59,6 +60,20 @@ def test_playback_lifecycle(tone_file):
     assert durations and durations[-1] == pytest.approx(1.0, abs=0.2)
     assert positions, "no position updates received"
     engine.shutdown()
+
+
+def test_engine_creation_under_comma_decimal_locale():
+    """Regression: GTK sets the process locale from the environment; libmpv
+    refuses to start when LC_NUMERIC uses decimal commas (e.g. de_DE)."""
+    try:
+        locale.setlocale(locale.LC_ALL, "de_DE.UTF-8")
+    except locale.Error:
+        pytest.skip("de_DE.UTF-8 locale not generated on this system")
+    try:
+        engine = PlayerEngine(extra_options={"ao": "null"})
+        engine.shutdown()
+    finally:
+        locale.setlocale(locale.LC_ALL, "C")
 
 
 def test_pause_and_seek(tone_file):

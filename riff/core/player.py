@@ -9,10 +9,25 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import locale
 import logging
 import threading
 
 log = logging.getLogger("riff.player")
+
+
+def _ensure_c_numeric_locale() -> None:
+    """libmpv refuses to initialize unless LC_NUMERIC is "C".
+
+    GTK sets the process locale from the environment, so on e.g. German
+    systems LC_NUMERIC becomes de_DE and mpv_create() returns NULL. Forcing
+    LC_NUMERIC back to "C" is explicitly what mpv's docs ask clients to do,
+    and it does not affect GTK's translations or date/number display.
+    """
+    try:
+        locale.setlocale(locale.LC_NUMERIC, "C")
+    except locale.Error:
+        pass
 
 # --- minimal libmpv binding -------------------------------------------------
 
@@ -80,6 +95,7 @@ class _Mpv:
     """Raw handle wrapper."""
 
     def __init__(self, extra_options: dict[str, str] | None = None):
+        _ensure_c_numeric_locale()
         lib = _load_libmpv()
         lib.mpv_create.restype = ctypes.c_void_p
         lib.mpv_wait_event.restype = ctypes.POINTER(_MpvEvent)
