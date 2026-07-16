@@ -1,10 +1,11 @@
-## Riff 0.9.1 🎵
+## Riff 0.10.0 🎵
 
-**Local AI Mix without Ollama** — Install downloads a small GGUF (**Qwen 2.5 1.5B**, ~1 GB) and runs it **inside Riff** via llama.cpp. No server, no account. Cloud Claude / OpenAI-compatible options remain.
+**Playlist folders** (Spotify-style) — create folders from the sidebar **＋ New** menu, nest playlists inside, expand/collapse in the sidebar. Move playlists between folders from the Playlists page.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
 - Stream songs, albums, artists and playlists from YouTube Music — no ads, no account
+- **Playlist folders** — organize local playlists like Spotify
 - **Local AI** for AI Mix — one-click install, on-device inference (no Ollama)
 - **Add** button on public playlists — one click to copy them into your local library
 - Icons that stay visible on CachyOS / elementary / Breeze dark themes

@@ -26,10 +26,18 @@ CREATE TABLE IF NOT EXISTS history (
     played_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_history_video ON history(video_id);
+CREATE TABLE IF NOT EXISTS playlist_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 0,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    created_at REAL NOT NULL
+    created_at REAL NOT NULL,
+    folder_id INTEGER REFERENCES playlist_folders(id) ON DELETE SET NULL,
+    position INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS playlist_items (
     playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
@@ -65,10 +73,37 @@ class Library:
         self._db.execute("PRAGMA foreign_keys = ON")
         with self._lock, self._db:
             self._db.executescript(SCHEMA)
+            self._migrate_locked()
 
     def close(self) -> None:
         with self._lock:
             self._db.close()
+
+    def _migrate_locked(self) -> None:
+        """Bring older library.db files up to the current schema."""
+        cols = {
+            r[1]
+            for r in self._db.execute("PRAGMA table_info(playlists)").fetchall()
+        }
+        if "folder_id" not in cols:
+            self._db.execute(
+                "ALTER TABLE playlists ADD COLUMN folder_id INTEGER "
+                "REFERENCES playlist_folders(id) ON DELETE SET NULL"
+            )
+        if "position" not in cols:
+            self._db.execute(
+                "ALTER TABLE playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0"
+            )
+        # Ensure folder table exists even if SCHEMA was already applied from an
+        # older package that lacked it (CREATE IF NOT EXISTS in SCHEMA covers
+        # fresh DBs; this is a safety net for partial upgrades).
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS playlist_folders ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "name TEXT NOT NULL,"
+            "position INTEGER NOT NULL DEFAULT 0,"
+            "created_at REAL NOT NULL)"
+        )
 
     # -- favorites ---------------------------------------------------------
 
@@ -139,13 +174,82 @@ class Library:
             ).fetchall()
         return [(Track.from_dict(json.loads(r[0])), r[1]) for r in rows]
 
+    # -- playlist folders (Spotify-style) --------------------------------------
+
+    def create_folder(self, name: str) -> int:
+        with self._lock, self._db:
+            row = self._db.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM playlist_folders"
+            ).fetchone()
+            cur = self._db.execute(
+                "INSERT INTO playlist_folders (name, position, created_at) "
+                "VALUES (?,?,?)",
+                (name, row[0] + 1, time.time()),
+            )
+            return cur.lastrowid
+
+    def rename_folder(self, folder_id: int, name: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE playlist_folders SET name = ? WHERE id = ?",
+                (name, folder_id),
+            )
+
+    def delete_folder(self, folder_id: int) -> None:
+        """Remove the folder; playlists inside move back to the root."""
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE playlists SET folder_id = NULL WHERE folder_id = ?",
+                (folder_id,),
+            )
+            self._db.execute(
+                "DELETE FROM playlist_folders WHERE id = ?", (folder_id,)
+            )
+
+    def folders(self) -> list[tuple[int, str]]:
+        """[(id, name)] ordered for the sidebar."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT id, name FROM playlist_folders "
+                "ORDER BY position, created_at"
+            ).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def set_playlist_folder(
+        self, playlist_id: int, folder_id: int | None
+    ) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "UPDATE playlists SET folder_id = ? WHERE id = ?",
+                (folder_id, playlist_id),
+            )
+
+    def playlist_folder_id(self, playlist_id: int) -> int | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT folder_id FROM playlists WHERE id = ?", (playlist_id,)
+            ).fetchone()
+        return row[0] if row else None
+
     # -- playlists -----------------------------------------------------------
 
-    def create_playlist(self, name: str) -> int:
+    def create_playlist(self, name: str, folder_id: int | None = None) -> int:
         with self._lock, self._db:
+            if folder_id is None:
+                row = self._db.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM playlists "
+                    "WHERE folder_id IS NULL"
+                ).fetchone()
+            else:
+                row = self._db.execute(
+                    "SELECT COALESCE(MAX(position), -1) FROM playlists "
+                    "WHERE folder_id = ?",
+                    (folder_id,),
+                ).fetchone()
             cur = self._db.execute(
-                "INSERT INTO playlists (name, created_at) VALUES (?,?)",
-                (name, time.time()),
+                "INSERT INTO playlists (name, created_at, folder_id, position) "
+                "VALUES (?,?,?,?)",
+                (name, time.time(), folder_id, row[0] + 1),
             )
             return cur.lastrowid
 
@@ -159,15 +263,64 @@ class Library:
                 "UPDATE playlists SET name = ? WHERE id = ?", (name, playlist_id)
             )
 
-    def playlists(self) -> list[tuple[int, str, int]]:
-        """[(id, name, track_count)]"""
+    def playlists(self, folder_id: int | None | object = ...) -> list[tuple[int, str, int]]:
+        """[(id, name, track_count)].
+
+        * No argument — every playlist (for “add to playlist” pickers).
+        * ``folder_id=None`` — only root (not in a folder).
+        * ``folder_id=<id>`` — only that folder.
+        """
         with self._lock:
-            rows = self._db.execute(
-                "SELECT p.id, p.name, COUNT(i.video_id) FROM playlists p "
-                "LEFT JOIN playlist_items i ON i.playlist_id = p.id "
-                "GROUP BY p.id ORDER BY p.created_at"
-            ).fetchall()
+            if folder_id is ...:
+                rows = self._db.execute(
+                    "SELECT p.id, p.name, COUNT(i.video_id) FROM playlists p "
+                    "LEFT JOIN playlist_items i ON i.playlist_id = p.id "
+                    "GROUP BY p.id ORDER BY p.folder_id IS NOT NULL, "
+                    "p.position, p.created_at"
+                ).fetchall()
+            elif folder_id is None:
+                rows = self._db.execute(
+                    "SELECT p.id, p.name, COUNT(i.video_id) FROM playlists p "
+                    "LEFT JOIN playlist_items i ON i.playlist_id = p.id "
+                    "WHERE p.folder_id IS NULL "
+                    "GROUP BY p.id ORDER BY p.position, p.created_at"
+                ).fetchall()
+            else:
+                rows = self._db.execute(
+                    "SELECT p.id, p.name, COUNT(i.video_id) FROM playlists p "
+                    "LEFT JOIN playlist_items i ON i.playlist_id = p.id "
+                    "WHERE p.folder_id = ? "
+                    "GROUP BY p.id ORDER BY p.position, p.created_at",
+                    (folder_id,),
+                ).fetchall()
         return [(r[0], r[1], r[2]) for r in rows]
+
+    def playlist_tree(self) -> list[dict]:
+        """Sidebar-friendly structure: folders (with children) then root lists.
+
+        Each item is either::
+            {"kind": "folder", "id": int, "name": str,
+             "playlists": [(id, name, count), ...]}
+        or::
+            {"kind": "playlist", "id": int, "name": str, "count": int}
+        """
+        folders = self.folders()
+        tree: list[dict] = []
+        for fid, fname in folders:
+            tree.append({
+                "kind": "folder",
+                "id": fid,
+                "name": fname,
+                "playlists": self.playlists(folder_id=fid),
+            })
+        for pid, name, count in self.playlists(folder_id=None):
+            tree.append({
+                "kind": "playlist",
+                "id": pid,
+                "name": name,
+                "count": count,
+            })
+        return tree
 
     def playlist_tracks(self, playlist_id: int) -> list[Track]:
         with self._lock:

@@ -65,6 +65,34 @@ def test_playlists(lib):
     assert lib.playlists() == []
 
 
+def test_playlist_folders(lib):
+    fid = lib.create_folder("Workouts")
+    assert lib.folders() == [(fid, "Workouts")]
+    a = lib.create_playlist("Cardio", folder_id=fid)
+    b = lib.create_playlist("Loose")  # root
+    assert lib.playlists(folder_id=fid) == [(a, "Cardio", 0)]
+    assert lib.playlists(folder_id=None) == [(b, "Loose", 0)]
+    # all playlists still listed for pickers
+    all_ids = {p[0] for p in lib.playlists()}
+    assert all_ids == {a, b}
+
+    lib.set_playlist_folder(b, fid)
+    assert lib.playlist_folder_id(b) == fid
+    assert {p[0] for p in lib.playlists(folder_id=fid)} == {a, b}
+    assert lib.playlists(folder_id=None) == []
+
+    tree = lib.playlist_tree()
+    assert tree[0]["kind"] == "folder" and tree[0]["id"] == fid
+    assert len(tree[0]["playlists"]) == 2
+
+    lib.rename_folder(fid, "Gym")
+    assert lib.folders()[0][1] == "Gym"
+    lib.delete_folder(fid)
+    assert lib.folders() == []
+    # playlists survive and return to root
+    assert {p[0] for p in lib.playlists(folder_id=None)} == {a, b}
+
+
 def test_follows(lib):
     assert lib.followed_artists() == []
     lib.follow_artist("UC1", "Daft Punk", "http://thumb")

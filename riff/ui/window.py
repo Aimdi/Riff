@@ -197,18 +197,23 @@ class MainWindow(Adw.ApplicationWindow):
 
         # playlists section ---------------------------------------------------
         sidebar_box.append(Gtk.Separator(margin_top=10, margin_bottom=4))
-        self._new_pl = Gtk.Button()
-        self._new_pl_label = Gtk.Label(label="＋  New playlist")
+        # Spotify-style create menu: new playlist or folder
+        self._new_pl = Gtk.MenuButton()
+        self._new_pl_label = Gtk.Label(label="＋  New")
         self._new_pl.set_child(self._new_pl_label)
         self._new_pl.add_css_class("pill")
         self._new_pl.set_margin_top(6)
         self._new_pl.set_margin_bottom(4)
-        self._new_pl.set_tooltip_text("New playlist")
-        self._new_pl.connect("clicked", lambda *_: self.prompt_text(
-            "New Playlist", "Name",
-            lambda name: (self.library.create_playlist(name),
-                          self.reload_sidebar_playlists())))
+        self._new_pl.set_tooltip_text("New playlist or folder")
+        create_menu = Gio.Menu()
+        create_menu.append("New playlist", "win.new-playlist")
+        create_menu.append("New folder", "win.new-folder")
+        self._new_pl.set_menu_model(create_menu)
         sidebar_box.append(self._new_pl)
+        self._expanded_folders: set[int] = set(
+            int(x) for x in (config.settings.get("expanded_folders") or [])
+            if str(x).lstrip("-").isdigit()
+        )
 
         self.playlist_list = Gtk.ListBox()
         self.playlist_list.add_css_class("navigation-sidebar")
@@ -275,6 +280,8 @@ class MainWindow(Adw.ApplicationWindow):
             "mini": self.open_mini_player,
             "shortcuts": self.show_shortcuts,
             "about": self.show_about,
+            "new-playlist": self.create_playlist_dialog,
+            "new-folder": self.create_folder_dialog,
         }
         for name, cb in actions.items():
             action = Gio.SimpleAction.new(name, None)
@@ -346,8 +353,8 @@ class MainWindow(Adw.ApplicationWindow):
             box.set_halign(Gtk.Align.CENTER if collapsed else Gtk.Align.FILL)
             box.set_margin_start(0 if collapsed else 8)
             row.set_tooltip_text(label if collapsed else None)
-        # new-playlist button: Spotify-style round "+" when collapsed
-        self._new_pl_label.set_label("＋" if collapsed else "＋  New playlist")
+        # create menu: Spotify-style round "+" when collapsed
+        self._new_pl_label.set_label("＋" if collapsed else "＋  New")
         if collapsed:
             self._new_pl.remove_css_class("pill")
             self._new_pl.add_css_class("circular")
@@ -362,29 +369,38 @@ class MainWindow(Adw.ApplicationWindow):
             self._new_pl.set_margin_end(10)
 
     def reload_sidebar_playlists(self) -> None:
-        """Fill the sidebar with local playlists plus, when an account is
-        connected, the account's own playlists (incl. Liked Music)."""
+        """Fill the sidebar with folders, local playlists, and (when signed
+        in) the account's YouTube Music playlists."""
 
         def work():
-            local = []
-            for pid, name, count in self.library.playlists():
-                tracks = self.library.playlist_tracks(pid)
-                cover = tracks[0].thumbnail if tracks else ""
-                local.append((pid, name, count, cover))
+            tree = self.library.playlist_tree()
+            covers: dict[int, str] = {}
+            for item in tree:
+                if item["kind"] == "playlist":
+                    tracks = self.library.playlist_tracks(item["id"])
+                    covers[item["id"]] = tracks[0].thumbnail if tracks else ""
+                else:
+                    for pid, _n, _c in item["playlists"]:
+                        tracks = self.library.playlist_tracks(pid)
+                        covers[pid] = tracks[0].thumbnail if tracks else ""
             try:
                 remote = self.api.library_playlists()
             except Exception:  # noqa: BLE001 — sidebar must never fail hard
                 remote = []
-            return local, remote
+            return tree, covers, remote
 
         def present(data) -> None:
-            local, remote = data
+            tree, covers, remote = data
             self.playlist_list.remove_all()
-            for pid, name, count, cover in local:
-                plural = "song" if count == 1 else "songs"
-                self._add_playlist_row(
-                    name, f"{count} {plural} · local", "local", (pid, name),
-                    cover)
+            for item in tree:
+                if item["kind"] == "folder":
+                    self._add_folder_row(item, covers)
+                else:
+                    pid, name, count = item["id"], item["name"], item["count"]
+                    plural = "song" if count == 1 else "songs"
+                    self._add_playlist_row(
+                        name, f"{count} {plural} · local", "local",
+                        (pid, name), covers.get(pid, ""), indent=0)
             for pl in remote:
                 self._add_playlist_row(
                     pl.title, pl.author or "YouTube Music", "remote",
@@ -392,8 +408,78 @@ class MainWindow(Adw.ApplicationWindow):
 
         run_async(work, present, lambda _e: None, name="riff-sidebar-pl")
 
+    def _add_folder_row(self, item: dict, covers: dict[int, str]) -> None:
+        from gi.repository import Pango
+
+        from . import iconutil
+        from .widgets import CoverArt
+
+        fid = item["id"]
+        name = item["name"]
+        children = item["playlists"]
+        expanded = fid in self._expanded_folders
+        n = len(children)
+        plural = "playlist" if n == 1 else "playlists"
+
+        row = Gtk.ListBoxRow()
+        row.kind = "folder"
+        row.ref = fid
+
+        if self._sidebar_collapsed:
+            art = CoverArt(52, icon="folder-music-symbolic")
+            art.set_margin_top(4)
+            art.set_margin_bottom(4)
+            art.set_halign(Gtk.Align.CENTER)
+            row.set_child(art)
+            row.set_tooltip_text(f"{name}\n{n} {plural}")
+            self.playlist_list.append(row)
+            # When collapsed, still show children as cover tiles under it.
+            if expanded:
+                for pid, pname, count in children:
+                    ppl = "song" if count == 1 else "songs"
+                    self._add_playlist_row(
+                        pname, f"{count} {ppl} · local", "local",
+                        (pid, pname), covers.get(pid, ""), indent=0)
+            return
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(6)
+        chevron = Gtk.Label(label="▾" if expanded else "▸")
+        chevron.add_css_class("dim-label")
+        chevron.set_width_chars(1)
+        box.append(chevron)
+        icon = iconutil.image("folder-music-symbolic", size=18)
+        icon.set_valign(Gtk.Align.CENTER)
+        box.append(icon)
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_valign(Gtk.Align.CENTER)
+        text_box.set_hexpand(True)
+        t = Gtk.Label(label=name)
+        t.set_xalign(0.0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        t.add_css_class("heading")
+        s = Gtk.Label(label=f"{n} {plural}")
+        s.set_xalign(0.0)
+        s.add_css_class("dim-label")
+        s.add_css_class("caption")
+        text_box.append(t)
+        text_box.append(s)
+        box.append(text_box)
+        row.set_child(box)
+        self.playlist_list.append(row)
+
+        if expanded:
+            for pid, pname, count in children:
+                ppl = "song" if count == 1 else "songs"
+                self._add_playlist_row(
+                    pname, f"{count} {ppl} · local", "local",
+                    (pid, pname), covers.get(pid, ""), indent=1)
+
     def _add_playlist_row(self, title: str, subtitle: str,
-                          kind: str, ref, cover: str = "") -> None:
+                          kind: str, ref, cover: str = "",
+                          indent: int = 0) -> None:
         from gi.repository import Pango
 
         from .widgets import CoverArt
@@ -417,7 +503,7 @@ class MainWindow(Adw.ApplicationWindow):
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         box.set_margin_top(4)
         box.set_margin_bottom(4)
-        box.set_margin_start(6)
+        box.set_margin_start(6 + (18 * indent))
         art = CoverArt(38, icon="view-list-symbolic")
         art.set_url(cover)
         art.set_valign(Gtk.Align.CENTER)
@@ -440,10 +526,20 @@ class MainWindow(Adw.ApplicationWindow):
         self.playlist_list.append(row)
 
     def _on_sidebar_playlist(self, _lb, row) -> None:
-        if row.kind == "local":
+        kind = getattr(row, "kind", None)
+        if kind == "folder":
+            fid = row.ref
+            if fid in self._expanded_folders:
+                self._expanded_folders.discard(fid)
+            else:
+                self._expanded_folders.add(fid)
+            config.settings.set(
+                "expanded_folders", sorted(self._expanded_folders))
+            self.reload_sidebar_playlists()
+        elif kind == "local":
             pid, name = row.ref
             self.open_local_playlist(pid, name)
-        else:
+        elif kind == "remote":
             self.open_playlist(row.ref)
 
     def _on_queue_toggle(self, btn) -> None:
@@ -635,6 +731,48 @@ class MainWindow(Adw.ApplicationWindow):
             "New Playlist", "Name",
             lambda name: (self.library.create_playlist(name),
                           self.reload_sidebar_playlists()))
+
+    def create_folder_dialog(self) -> None:
+        self.prompt_text(
+            "New Folder", "Name",
+            lambda name: (self.library.create_folder(name),
+                          self.reload_sidebar_playlists(),
+                          self.toast(f"Folder “{name}” created")))
+
+    def choose_folder_for(self, playlist_id: int) -> None:
+        """Move a local playlist into a folder (or root)."""
+        folders = self.library.folders()
+        dialog = Adw.AlertDialog.new("Move to folder", None)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("boxed-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+
+        def pick(folder_id: int | None, label: str):
+            row = Adw.ActionRow()
+            row.set_title(label)
+            row.set_activatable(True)
+            row.connect("activated", lambda _r, fid=folder_id: (
+                self.library.set_playlist_folder(playlist_id, fid),
+                self.toast("Moved" if fid is not None else "Moved to root"),
+                self.reload_sidebar_playlists(),
+                (self.pages["playlists"].refresh()
+                 if "playlists" in self.pages else None),
+                dialog.close()))
+            listbox.append(row)
+
+        pick(None, "No folder (root)")
+        for fid, fname in folders:
+            pick(fid, fname)
+        box.append(listbox)
+        if not folders:
+            hint = Gtk.Label(label="Create a folder from the sidebar ＋ menu first")
+            hint.add_css_class("dim-label")
+            hint.set_wrap(True)
+            box.append(hint)
+        dialog.set_extra_child(box)
+        dialog.add_response("cancel", "Cancel")
+        dialog.present(self)
 
     # -- shortcuts overlay -------------------------------------------------------
 

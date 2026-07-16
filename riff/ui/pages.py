@@ -685,73 +685,149 @@ class LocalFilesPage(ContentPage):
 
 
 class PlaylistsPage(ContentPage):
-    """Local playlists list + create button."""
+    """Local playlists + folders (Spotify-style)."""
 
     def __init__(self, window):
         super().__init__(window)
 
     def refresh(self) -> None:
         def work():
-            playlists = self.window.library.playlists()
+            tree = self.window.library.playlist_tree()
             covers = {}
-            for pid, _name, _count in playlists:
-                tracks = self.window.library.playlist_tracks(pid)
-                covers[pid] = tracks[0].thumbnail if tracks else ""
-            return playlists, covers
+            for item in tree:
+                if item["kind"] == "playlist":
+                    tracks = self.window.library.playlist_tracks(item["id"])
+                    covers[item["id"]] = tracks[0].thumbnail if tracks else ""
+                else:
+                    for pid, _n, _c in item["playlists"]:
+                        tracks = self.window.library.playlist_tracks(pid)
+                        covers[pid] = tracks[0].thumbnail if tracks else ""
+            return tree, covers
 
         self.load_async(work, self._present)
 
     def _present(self, data) -> None:
-        playlists, covers = data
+        tree, covers = data
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
 
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         new_btn = Gtk.Button()
         new_btn.set_child(_button_content("list-add-symbolic", "New Playlist"))
         new_btn.add_css_class("pill")
-        new_btn.set_halign(Gtk.Align.START)
-        new_btn.connect("clicked", lambda *_: self._create_dialog())
-        box.append(new_btn)
+        new_btn.connect("clicked", lambda *_: self._create_playlist())
+        actions.append(new_btn)
+        folder_btn = Gtk.Button()
+        folder_btn.set_child(
+            _button_content("folder-music-symbolic", "New Folder"))
+        folder_btn.add_css_class("pill")
+        folder_btn.connect("clicked", lambda *_: self._create_folder())
+        actions.append(folder_btn)
+        box.append(actions)
 
-        if playlists:
-            listbox = Gtk.ListBox()
-            listbox.add_css_class("boxed-list")
-            listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-            for pid, name, count in playlists:
-                row = Adw.ActionRow()
-                row.set_title(name)
-                row.set_subtitle(f"{count} songs")
-                row.set_activatable(True)
-                art = CoverArt(44, icon="view-list-symbolic")
-                art.set_url(covers.get(pid, ""))
-                art.set_valign(Gtk.Align.CENTER)
-                row.add_prefix(art)
-                rename = Gtk.Button()
-                iconutil.set_button(rename, "document-edit-symbolic")
-                rename.add_css_class("flat")
-                rename.set_valign(Gtk.Align.CENTER)
-                rename.set_tooltip_text("Rename")
-                rename.connect("clicked", self._on_rename, pid)
-                row.add_suffix(rename)
-                delete = Gtk.Button()
-                iconutil.set_button(delete, "user-trash-symbolic")
-                delete.add_css_class("flat")
-                delete.set_valign(Gtk.Align.CENTER)
-                delete.set_tooltip_text("Delete")
-                delete.connect("clicked", self._on_delete, pid)
-                row.add_suffix(delete)
-                row.connect("activated", self._on_open, pid, name)
-                listbox.append(row)
-            box.append(listbox)
-        else:
+        if not tree:
             box.append(status_page(
                 "view-list-symbolic", "No playlists yet",
-                "Create a playlist and add songs from any song menu."))
+                "Create a playlist or a folder to organize them."))
+            self.show_widget(scroll_wrap(_padded(box)))
+            return
+
+        for item in tree:
+            if item["kind"] == "folder":
+                box.append(self._folder_block(item, covers))
+            else:
+                listbox = Gtk.ListBox()
+                listbox.add_css_class("boxed-list")
+                listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+                listbox.append(self._playlist_row(
+                    item["id"], item["name"], item["count"], covers))
+                box.append(listbox)
+
         self.show_widget(scroll_wrap(_padded(box)))
 
-    def _create_dialog(self) -> None:
+    def _folder_block(self, item: dict, covers: dict) -> Gtk.Widget:
+        block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title = Gtk.Label(label=f"📁  {item['name']}")
+        title.add_css_class("title-3")
+        title.set_xalign(0.0)
+        title.set_hexpand(True)
+        header.append(title)
+        rename = Gtk.Button()
+        iconutil.set_button(rename, "document-edit-symbolic")
+        rename.add_css_class("flat")
+        rename.set_tooltip_text("Rename folder")
+        rename.connect("clicked", self._on_rename_folder, item["id"])
+        header.append(rename)
+        delete = Gtk.Button()
+        iconutil.set_button(delete, "user-trash-symbolic")
+        delete.add_css_class("flat")
+        delete.set_tooltip_text("Delete folder (playlists stay)")
+        delete.connect("clicked", self._on_delete_folder, item["id"])
+        header.append(delete)
+        block.append(header)
+
+        listbox = Gtk.ListBox()
+        listbox.add_css_class("boxed-list")
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        if item["playlists"]:
+            for pid, name, count in item["playlists"]:
+                listbox.append(self._playlist_row(pid, name, count, covers))
+        else:
+            empty = Adw.ActionRow()
+            empty.set_title("Empty folder")
+            empty.set_subtitle("Move playlists here from the ⋮ menu")
+            empty.set_sensitive(False)
+            listbox.append(empty)
+        block.append(listbox)
+        return block
+
+    def _playlist_row(self, pid: int, name: str, count: int,
+                      covers: dict) -> Adw.ActionRow:
+        row = Adw.ActionRow()
+        row.set_title(name)
+        row.set_subtitle(f"{count} songs")
+        row.set_activatable(True)
+        art = CoverArt(44, icon="view-list-symbolic")
+        art.set_url(covers.get(pid, ""))
+        art.set_valign(Gtk.Align.CENTER)
+        row.add_prefix(art)
+        move = Gtk.Button()
+        iconutil.set_button(move, "folder-music-symbolic")
+        move.add_css_class("flat")
+        move.set_valign(Gtk.Align.CENTER)
+        move.set_tooltip_text("Move to folder")
+        move.connect(
+            "clicked",
+            lambda *_: self.window.choose_folder_for(pid))
+        row.add_suffix(move)
+        rename = Gtk.Button()
+        iconutil.set_button(rename, "document-edit-symbolic")
+        rename.add_css_class("flat")
+        rename.set_valign(Gtk.Align.CENTER)
+        rename.set_tooltip_text("Rename")
+        rename.connect("clicked", self._on_rename, pid)
+        row.add_suffix(rename)
+        delete = Gtk.Button()
+        iconutil.set_button(delete, "user-trash-symbolic")
+        delete.add_css_class("flat")
+        delete.set_valign(Gtk.Align.CENTER)
+        delete.set_tooltip_text("Delete")
+        delete.connect("clicked", self._on_delete, pid)
+        row.add_suffix(delete)
+        row.connect("activated", self._on_open, pid, name)
+        return row
+
+    def _create_playlist(self) -> None:
         self.window.prompt_text(
             "New Playlist", "Name",
             lambda name: (self.window.library.create_playlist(name),
+                          self.refresh(),
+                          self.window.reload_sidebar_playlists()))
+
+    def _create_folder(self) -> None:
+        self.window.prompt_text(
+            "New Folder", "Name",
+            lambda name: (self.window.library.create_folder(name),
                           self.refresh(),
                           self.window.reload_sidebar_playlists()))
 
@@ -763,8 +839,21 @@ class PlaylistsPage(ContentPage):
                           self.window.reload_sidebar_playlists()),
             accept_label="Rename")
 
+    def _on_rename_folder(self, _btn, folder_id: int) -> None:
+        self.window.prompt_text(
+            "Rename Folder", "New name",
+            lambda name: (self.window.library.rename_folder(folder_id, name),
+                          self.refresh(),
+                          self.window.reload_sidebar_playlists()),
+            accept_label="Rename")
+
     def _on_delete(self, _btn, pid: int) -> None:
         self.window.library.delete_playlist(pid)
+        self.refresh()
+        self.window.reload_sidebar_playlists()
+
+    def _on_delete_folder(self, _btn, folder_id: int) -> None:
+        self.window.library.delete_folder(folder_id)
         self.refresh()
         self.window.reload_sidebar_playlists()
 
