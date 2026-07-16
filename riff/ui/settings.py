@@ -135,11 +135,12 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._provider_row = provider
 
         auto = Adw.SwitchRow()
-        auto.set_title("Refresh AI Mix daily")
+        auto.set_title("For you on Home")
         auto.set_subtitle(
-            "Rebuild the “✨ AI Mix” playlist automatically once a day "
-            "when Riff starts")
-        auto.set_active(bool(config.settings.get("ai_mix_auto_refresh", False)))
+            "On by default: Home shows AI song picks at the top and "
+            "refreshes your mix in the background (uses AI when set up, "
+            "otherwise smart radio from your history)")
+        auto.set_active(bool(config.settings.get("ai_mix_auto_refresh", True)))
         auto.connect("notify::active", lambda row, _p: config.settings.set(
             "ai_mix_auto_refresh", bool(row.get_active())))
         ai.add(auto)

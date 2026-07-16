@@ -64,11 +64,15 @@ class ContentPage(Gtk.Box):
 
 
 class HomePage(ContentPage):
+    """Home feed: seamless “For you” picks on top, then YT Music sections."""
+
     def __init__(self, window):
         super().__init__(window)
         self._loaded = False
         self._box: Gtk.Box | None = None
         self._top: Gtk.Box | None = None
+        self._for_you_host: Gtk.Box | None = None
+        self._for_you_busy = False
 
     def refresh(self, force: bool = False) -> None:
         if self._loaded and not force:
@@ -83,22 +87,26 @@ class HomePage(ContentPage):
         box.set_margin_start(18)
         box.set_margin_end(18)
 
-        # Fixed top strip: AI Mixes, then followed-artist releases, then YT home.
+        # Top strip: For you (AI / smart picks) → followed releases → YT home.
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         box.append(top)
         self._top = top
         self._box = box
 
-        ai_items = self._ai_mix_cards()
-        if ai_items:
-            top.append(Carousel("AI Mixes", ai_items, self.window))
+        self._for_you_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        top.append(self._for_you_host)
 
-        if not sections and not ai_items:
-            self.show_widget(status_page(
-                "emblem-music-symbolic", "Nothing here yet",
-                "Could not load recommendations — try searching instead."))
-            self._load_followed_releases(top)
-            return
+        # Instant paint from cache, then refresh in the background.
+        cached = self._cached_for_you()
+        if cached:
+            self.show_for_you(cached, source="ai")
+        else:
+            self._show_for_you_loading()
+        self._ensure_for_you()
+
+        if not sections and not cached:
+            # Still show the page shell; For you may fill in shortly.
+            pass
 
         for section in sections or []:
             tracks = [i for i in section.items if isinstance(i, Track)]
@@ -113,41 +121,128 @@ class HomePage(ContentPage):
                 tl = TrackList(self.window, radio_on_single=True)
                 tl.set_tracks(tracks[:10])
                 box.append(tl)
+
+        if not sections and not cached:
+            # Placeholder under For you if YT home is empty too.
+            empty = status_page(
+                "emblem-music-symbolic", "Loading your feed…",
+                "Personal picks appear above as soon as they're ready.")
+            box.append(empty)
+
         self.show_widget(scroll_wrap(box))
         self._load_followed_releases(top)
 
-    def _ai_mix_cards(self) -> list:
-        """Cards for the Home “AI Mixes” row (local playlist + generate)."""
+    def _cached_for_you(self) -> list[Track]:
         from .window import AI_MIX_PLAYLIST
 
-        items: list = []
-        lib = self.window.library
-        pid = lib.find_playlist(AI_MIX_PLAYLIST)
-        if pid is not None:
-            tracks = lib.playlist_tracks(pid)
-            if tracks:
-                cover = tracks[0].thumbnail or ""
-                n = len(tracks)
-                plural = "song" if n == 1 else "songs"
-                items.append(Playlist(
-                    playlist_id=f"local:{pid}",
-                    title=AI_MIX_PLAYLIST,
-                    author=f"{n} {plural} · your mix",
-                    thumbnail=cover,
-                    track_count=n,
-                ))
-        # Always offer generate/refresh so the row stays useful when empty.
-        items.append(Playlist(
-            playlist_id="action:ai-mix",
-            title="✨ Generate AI Mix",
-            author="Fresh picks from your taste",
-            thumbnail="",
-            track_count=0,
-        ))
-        return items
+        pid = self.window.library.find_playlist(AI_MIX_PLAYLIST)
+        if pid is None:
+            return []
+        return self.window.library.playlist_tracks(pid)[:12]
+
+    def _show_for_you_loading(self) -> None:
+        host = self._for_you_host
+        if host is None:
+            return
+        while child := host.get_first_child():
+            host.remove(child)
+        title = Gtk.Label(label="For you")
+        title.add_css_class("title-3")
+        title.set_xalign(0.0)
+        host.append(title)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(6)
+        spin = Gtk.Spinner()
+        spin.start()
+        row.append(spin)
+        hint = Gtk.Label(label="Picking songs for you…")
+        hint.add_css_class("dim-label")
+        row.append(hint)
+        host.append(row)
+
+    def show_for_you(self, tracks: list[Track], *, source: str = "ai") -> None:
+        """Paint / replace the For you block (called from Home or AI Mix)."""
+        host = self._for_you_host
+        if host is None or not tracks:
+            return
+        while child := host.get_first_child():
+            host.remove(child)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        title = Gtk.Label(label="For you")
+        title.add_css_class("title-3")
+        title.set_xalign(0.0)
+        title.set_hexpand(True)
+        header.append(title)
+        subtitle = {
+            "ai": "AI mix from your taste",
+            "radio": "Based on what you play",
+            "cache": "Your latest mix",
+        }.get(source, "")
+        if subtitle:
+            sub = Gtk.Label(label=subtitle)
+            sub.add_css_class("dim-label")
+            sub.add_css_class("caption")
+            header.append(sub)
+        host.append(header)
+
+        tl = TrackList(self.window, radio_on_single=True)
+        tl.set_tracks(tracks[:12])
+        host.append(tl)
+
+    def _ensure_for_you(self) -> None:
+        """Background: AI Mix if possible, else radio-based picks."""
+        if self._for_you_busy:
+            return
+        self._for_you_busy = True
+
+        # Prefer silent AI refresh when a provider is ready and mix is stale.
+        if self.window.try_auto_for_you():
+            # AI path will call on_for_you_ready when done.
+            return
+
+        self._load_radio_for_you(replace_cache=False)
+
+    def _load_radio_for_you(self, *, replace_cache: bool) -> None:
+        """Smart non-AI picks from YT radio around your taste."""
+        win = self.window
+        has_cache = bool(self._cached_for_you())
+        self._for_you_busy = True
+
+        def work():
+            from ..core.suggestions import radio_for_you
+            return radio_for_you(win.api, win.library, limit=12)
+
+        def done(tracks: list[Track]) -> None:
+            self._for_you_busy = False
+            if not tracks or self._for_you_host is None:
+                if not has_cache and self._for_you_host is not None:
+                    while child := self._for_you_host.get_first_child():
+                        self._for_you_host.remove(child)
+                return
+            if has_cache and not replace_cache and self._cached_for_you():
+                return
+            self.show_for_you(tracks, source="radio")
+
+        def fail(_exc: Exception) -> None:
+            self._for_you_busy = False
+            if not has_cache and self._for_you_host is not None:
+                while child := self._for_you_host.get_first_child():
+                    self._for_you_host.remove(child)
+
+        run_async(work, done, fail, name="riff-for-you")
+
+    def on_for_you_ready(self, tracks: list[Track], *, source: str = "ai") -> None:
+        """Called by the window after a background AI Mix finishes."""
+        self._for_you_busy = False
+        if tracks:
+            self.show_for_you(tracks, source=source)
+        elif not self._cached_for_you():
+            # AI failed with nothing saved — fall back without re-entering AI.
+            self._load_radio_for_you(replace_cache=True)
 
     def _load_followed_releases(self, top: Gtk.Box) -> None:
-        """Append a 'new from your artists' carousel under AI Mixes."""
+        """Append a 'new from your artists' carousel under For you."""
         follows = self.window.library.followed_artists()[:6]
         if not follows:
             return

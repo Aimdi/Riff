@@ -993,15 +993,17 @@ class MainWindow(Adw.ApplicationWindow):
         from ..core import local_ai
 
         provider = str(config.settings.get("ai_provider", "anthropic"))
+        local_ready = local_ai.status().ready
+
         if provider == "local":
-            st = local_ai.status()
-            if not st.ready:
+            if not local_ready:
                 if interactive:
                     self.toast(
                         "Install the local model in Settings → AI Mix first")
                     self.show_settings()
                 return None
             return {"provider": "local"}
+
         if provider == "openai":
             model = str(config.settings.get("openai_model", "") or "")
             if not model:
@@ -1015,32 +1017,47 @@ class MainWindow(Adw.ApplicationWindow):
                 "key": str(config.settings.get("openai_api_key", "") or ""),
                 "model": model,
             }
+
+        # anthropic (default)
         key = str(config.settings.get("anthropic_api_key", "") or "")
-        if not key:
-            if interactive:
-                self.toast("Add your Anthropic API key in Settings to use AI Mix")
-                self.show_settings()
-            return None
-        return {"provider": "anthropic", "key": key}
+        if key:
+            return {"provider": "anthropic", "key": key}
+        # Seamless Home: fall back to on-device model when no cloud key.
+        if local_ready:
+            return {"provider": "local"}
+        if interactive:
+            self.toast("Add your Anthropic API key in Settings to use AI Mix")
+            self.show_settings()
+        return None
 
     def start_ai_mix(self) -> None:
         self.refresh_ai_mix(interactive=True)
 
-    def maybe_auto_refresh_ai_mix(self) -> None:
-        """Daily background refresh, if enabled and configured."""
+    def try_auto_for_you(self) -> bool:
+        """Start a silent AI Mix for Home if possible. True when a job starts."""
         import datetime
 
-        if not config.settings.get("ai_mix_auto_refresh", False):
-            return
-        today = datetime.date.today().isoformat()
-        if config.settings.get("ai_mix_last_refresh", "") == today:
-            return
-        if self._ai_provider_config(interactive=False) is None:
-            return
+        if not config.settings.get("ai_mix_auto_refresh", True):
+            return False
         if not self.library.recent(1) and not self.library.favorites():
-            return
-        log.info("auto-refreshing AI Mix")
+            return False
+        cfg = self._ai_provider_config(interactive=False)
+        if cfg is None:
+            return False
+        today = datetime.date.today().isoformat()
+        # Refresh when never done today, or when the mix playlist is empty.
+        pid = self.library.find_playlist(AI_MIX_PLAYLIST)
+        has_tracks = bool(pid and self.library.playlist_tracks(pid))
+        if (config.settings.get("ai_mix_last_refresh", "") == today
+                and has_tracks):
+            return False
+        log.info("auto For you / AI Mix (silent)")
         self.refresh_ai_mix(interactive=False)
+        return True
+
+    def maybe_auto_refresh_ai_mix(self) -> None:
+        """Daily background refresh (also used shortly after app start)."""
+        self.try_auto_for_you()
 
     def refresh_ai_mix(self, interactive: bool = True) -> None:
         from ..core import ai, local_ai
@@ -1138,20 +1155,22 @@ class MainWindow(Adw.ApplicationWindow):
             config.settings.set(
                 "ai_mix_last_refresh", datetime.date.today().isoformat())
             self.reload_sidebar_playlists()
-            # Refresh Home so the AI Mixes row at the top shows the new cover.
             home = self.pages.get("home")
-            if home is not None and hasattr(home, "refresh"):
-                home._loaded = False
-                if self.stack.get_visible_child_name() == "home":
-                    home.refresh(force=True)
+            if home is not None and hasattr(home, "on_for_you_ready"):
+                home.on_for_you_ready(tracks[:12], source="ai")
             if interactive:
                 self.service.play_tracks(tracks)
                 dialog.close()
-            self.toast(
-                f"AI Mix refreshed: {len(tracks)} songs — on Home and "
-                f"in “{AI_MIX_PLAYLIST}”")
+                self.toast(
+                    f"AI Mix ready: {len(tracks)} songs — on Home under For you")
+            else:
+                log.info("silent AI Mix ready (%d songs)", len(tracks))
 
         def fail(exc: Exception) -> None:
+            home = self.pages.get("home")
+            if home is not None and hasattr(home, "on_for_you_ready"):
+                # Empty list → Home falls back to radio picks (no AI retry loop).
+                home.on_for_you_ready([], source="ai")
             if not interactive:
                 log.warning("background AI Mix refresh failed: %s", exc)
                 return

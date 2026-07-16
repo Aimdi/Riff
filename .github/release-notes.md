@@ -1,6 +1,10 @@
+## Riff 0.11.0 🎵
+
+**For you on Home (default)** — like RiPlay’s top picks: Home always leads with a **For you** song list. AI fills it when a provider/local model is ready; otherwise smart radio from your history. Auto-refresh is on by default — seamless, no extra clicks.
+
 ## Riff 0.10.3 🎵
 
-**AI Mixes on Home** — an “AI Mixes” row sits at the top of Home (above Fresh finds / likes). Open your mix or tap Generate AI Mix from there.
+**AI Mixes on Home** — earlier card-based AI Mixes row (replaced by For you in 0.11).
 
 ## Riff 0.10.2 🎵
 
