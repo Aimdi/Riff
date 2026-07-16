@@ -1,6 +1,6 @@
-## Riff 0.13.0 🎵
+## Riff 0.14.0 🎵
 
-**Playback fixed + Snowify-inspired goodies.** Songs stopped playing because YouTube broke the pinned yt-dlp player clients — the resolver now tries yt-dlp's own defaults first and falls back through alternate clients, resolving songs via music.youtube.com again (if it still fails, the error now tells you to update yt-dlp). New from the Snowify inspiration: a theme gallery (Pitch Black accent variants in Blue / Violet / Crimson / Amber plus a light Snow theme), auto-generated 2×2 collage covers for your playlists, and optional Discord Rich Presence (Settings → Discord Rich Presence).
+**Spotify playlists, the Spotube way.** Menu → *Import from Spotify…*: paste any public Spotify playlist or album link — Riff reads the track list from Spotify (anonymously, no account or API key) and matches every song on YouTube Music into a local playlist, with duration-aware matching so you get the real recordings, not sped-up covers. One-click classics included (Today's Top Hits, RapCaviar, lofi beats, …); re-import any time to pull playlist updates.
 
 ### What’s new since 0.8.0
 

@@ -181,6 +181,7 @@ class MainWindow(Adw.ApplicationWindow):
         header.set_title_widget(title)
         menu = Gio.Menu()
         menu.append("AI Mix", "win.ai-mix")
+        menu.append("Import from Spotify…", "win.spotify-import")
         menu.append("Lyrics", "win.lyrics")
         menu.append("Mini Player", "win.mini")
         menu.append("Keyboard Shortcuts", "win.shortcuts")
@@ -337,6 +338,7 @@ class MainWindow(Adw.ApplicationWindow):
             "lyrics": self.show_lyrics,
             "settings": self.show_settings,
             "ai-mix": self.start_ai_mix,
+            "spotify-import": self.import_spotify_dialog,
             "mini": self.open_mini_player,
             "shortcuts": self.show_shortcuts,
             "about": self.show_about,
@@ -1549,6 +1551,149 @@ class MainWindow(Adw.ApplicationWindow):
             status_label.add_css_class("error")
 
         run_async(work, done, fail, name="riff-ai-mix")
+
+    # -- Spotify import --------------------------------------------------------
+
+    # Well-known Spotify editorial playlists, one click away. Anything else
+    # can be pasted as a link. Region-locked entries fail gracefully.
+    SPOTIFY_PICKS = [
+        ("Today's Top Hits", "37i9dQZF1DXcBWIGoYBM5M"),
+        ("RapCaviar", "37i9dQZF1DX0XUsuxWHRQd"),
+        ("Hot Hits Deutschland", "37i9dQZF1DX4jP4eebSWR9"),
+        ("Rock Classics", "37i9dQZF1DWXRqgorJj26U"),
+        ("Beast Mode", "37i9dQZF1DX76Wlfdnj7AP"),
+        ("Peaceful Piano", "37i9dQZF1DX4sWSpwq3LiO"),
+        ("lofi beats", "37i9dQZF1DWWQRwui0ExPn"),
+    ]
+
+    def import_spotify_dialog(self) -> None:
+        from ..core import spotify
+
+        dialog = Adw.Dialog.new()
+        dialog.set_title("Import from Spotify")
+        dialog.set_content_width(460)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        box.append(Adw.HeaderBar())
+
+        hint = Gtk.Label(label=(
+            "Paste a link to any public Spotify playlist or album. Riff "
+            "reads its songs from Spotify and matches them on YouTube "
+            "Music — no Spotify account needed."))
+        hint.set_wrap(True)
+        hint.set_margin_start(20)
+        hint.set_margin_end(20)
+        hint.add_css_class("dim-label")
+        box.append(hint)
+
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("https://open.spotify.com/playlist/…")
+        entry.set_margin_start(20)
+        entry.set_margin_end(20)
+        box.append(entry)
+
+        import_btn = Gtk.Button.new_with_label("Import")
+        import_btn.add_css_class("suggested-action")
+        import_btn.add_css_class("pill")
+        import_btn.set_halign(Gtk.Align.CENTER)
+        box.append(import_btn)
+
+        def go(*_a) -> None:
+            parsed = spotify.parse_spotify_url(entry.get_text())
+            if not parsed:
+                self.toast(
+                    "That doesn't look like a Spotify playlist/album link")
+                return
+            dialog.close()
+            self._run_spotify_import(*parsed)
+
+        entry.connect("activate", go)
+        import_btn.connect("clicked", go)
+
+        picks_title = Gtk.Label(label="Or grab a Spotify classic:")
+        picks_title.add_css_class("dim-label")
+        picks_title.add_css_class("caption")
+        box.append(picks_title)
+        picks = Gtk.FlowBox()
+        picks.set_selection_mode(Gtk.SelectionMode.NONE)
+        picks.set_max_children_per_line(3)
+        picks.set_margin_start(14)
+        picks.set_margin_end(14)
+        picks.set_margin_bottom(20)
+        for name, pid in self.SPOTIFY_PICKS:
+            b = Gtk.Button.new_with_label(name)
+            b.add_css_class("pill")
+            b.connect(
+                "clicked",
+                lambda _b, p=pid: (dialog.close(),
+                                   self._run_spotify_import("playlist", p)))
+            picks.append(b)
+        box.append(picks)
+
+        dialog.set_child(box)
+        dialog.present(self)
+        entry.grab_focus()
+
+    def _run_spotify_import(self, kind: str, item_id: str) -> None:
+        from ..core import spotify
+
+        dialog = Adw.Dialog.new()
+        dialog.set_title("Spotify import")
+        dialog.set_content_width(380)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.append(Adw.HeaderBar())
+        spinner = Gtk.Spinner()
+        spinner.set_size_request(32, 32)
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.start()
+        box.append(spinner)
+        status_label = Gtk.Label(label="Reading the playlist from Spotify…")
+        status_label.set_wrap(True)
+        status_label.set_margin_start(20)
+        status_label.set_margin_end(20)
+        status_label.set_margin_bottom(24)
+        box.append(status_label)
+        dialog.set_child(box)
+        dialog.present(self)
+
+        def set_status(text: str) -> None:
+            GLib.idle_add(lambda: (status_label.set_label(text), False)[1])
+
+        def work():
+            sp = spotify.fetch(kind, item_id)
+            set_status(f"“{sp.name}” — matching {len(sp.tracks)} songs "
+                       "on YouTube Music…")
+
+            def prog(done_n: int, total: int) -> None:
+                set_status(f"“{sp.name}” — matching songs… {done_n}/{total}")
+
+            matched, missed = spotify.match_on_ytmusic(
+                self.api, sp.tracks, progress=prog)
+            if not matched:
+                raise RuntimeError(
+                    "None of the songs could be matched on YouTube Music")
+            pid = self.library.find_playlist(sp.name)
+            if pid is None:
+                pid = self.library.create_playlist(sp.name)
+            self.library.replace_playlist_tracks(pid, matched)
+            return sp.name, pid, len(matched), len(missed)
+
+        def done(result) -> None:
+            name, pid, n_ok, n_miss = result
+            dialog.close()
+            self.reload_sidebar_playlists()
+            msg = f"Imported “{name}”: {n_ok} songs"
+            if n_miss:
+                msg += f" ({n_miss} not found on YouTube Music)"
+            self.toast(msg)
+            self.open_local_playlist(pid, name)
+
+        def fail(exc: Exception) -> None:
+            spinner.stop()
+            spinner.set_visible(False)
+            status_label.set_label(f"Import failed:\n{exc}")
+            status_label.add_css_class("error")
+
+        run_async(work, done, fail, name="riff-spotify-import")
 
     def show_about(self) -> None:
         from .. import __version__

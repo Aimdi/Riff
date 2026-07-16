@@ -39,6 +39,10 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
   2×2 collage of their songs' covers (like Snowify/Spotify)
 - 🎮 **Discord Rich Presence** (optional) — show what you're listening to;
   Settings → Discord Rich Presence
+- 💚 **Spotify playlist import** — menu → *Import from Spotify…*: paste any
+  public Spotify playlist/album link (or pick a classic like Today's Top
+  Hits) and Riff matches the songs on YouTube Music — no Spotify account
+  needed; re-import any time to pull updates
 - 🚫 No ads, no tracking, no Google account required
 
 ## Install on CachyOS / Arch
