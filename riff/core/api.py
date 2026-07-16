@@ -311,6 +311,41 @@ class MusicApi:
                 tracks.append(track)
         return tracks
 
+    # -- account library -------------------------------------------------------
+
+    def library_playlists(self, limit: int = 50) -> list[Playlist]:
+        """The signed-in account's playlists, incl. Liked Music ("LM").
+
+        Empty when no account is connected.
+        """
+        if not self.authenticated:
+            return []
+        out = []
+        for p in self.yt.get_library_playlists(limit=limit) or []:
+            pid = p.get("playlistId")
+            if not pid:
+                continue
+            author = p.get("author")
+            if isinstance(author, list):
+                author = ", ".join(
+                    a.get("name", "") for a in author if isinstance(a, dict))
+            elif isinstance(author, dict):
+                author = author.get("name", "")
+            try:
+                count = int(p.get("count") or 0)
+            except (TypeError, ValueError):
+                count = 0
+            out.append(
+                Playlist(
+                    playlist_id=pid,
+                    title=p.get("title") or "",
+                    author=str(author or ""),
+                    thumbnail=_best_thumbnail(p.get("thumbnails")),
+                    track_count=count,
+                )
+            )
+        return out
+
     # -- radio / related ----------------------------------------------------
 
     def radio(self, video_id: str, limit: int = 25) -> list[Track]:

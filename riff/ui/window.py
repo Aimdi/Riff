@@ -143,8 +143,35 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_box.append(app_title)
         sidebar_box.append(self.sidebar_list)
 
+        # playlists section, YT-Music style ---------------------------------
+        sidebar_box.append(Gtk.Separator(margin_top=10, margin_bottom=4))
+        new_pl = Gtk.Button()
+        new_pl_label = Gtk.Label(label="＋  New playlist")
+        new_pl.set_child(new_pl_label)
+        new_pl.add_css_class("pill")
+        new_pl.set_margin_start(10)
+        new_pl.set_margin_end(10)
+        new_pl.set_margin_top(6)
+        new_pl.set_margin_bottom(4)
+        new_pl.connect("clicked", lambda *_: self.prompt_text(
+            "New Playlist", "Name",
+            lambda name: (self.library.create_playlist(name),
+                          self.reload_sidebar_playlists())))
+        sidebar_box.append(new_pl)
+
+        self.playlist_list = Gtk.ListBox()
+        self.playlist_list.add_css_class("navigation-sidebar")
+        self.playlist_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.playlist_list.connect("row-activated", self._on_sidebar_playlist)
+        sidebar_box.append(self.playlist_list)
+
+        sidebar_scroll = Gtk.ScrolledWindow()
+        sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sidebar_scroll.set_vexpand(True)
+        sidebar_scroll.set_child(sidebar_box)
+
         split = Adw.OverlaySplitView()
-        split.set_sidebar(sidebar_box)
+        split.set_sidebar(sidebar_scroll)
         split.set_content(content_box)
         split.set_min_sidebar_width(200)
         split.set_max_sidebar_width(220)
@@ -178,6 +205,7 @@ class MainWindow(Adw.ApplicationWindow):
         # select Home
         self.sidebar_list.select_row(self.sidebar_list.get_row_at_index(0))
         self.pages["home"].refresh()
+        self.reload_sidebar_playlists()
 
     # -- css / actions --------------------------------------------------------
 
@@ -232,6 +260,66 @@ class MainWindow(Adw.ApplicationWindow):
     def open_mood(self, title: str, params: str) -> None:
         self._push(MoodPage(self, title, params), title)
 
+    # -- sidebar playlists -------------------------------------------------------
+
+    def reload_sidebar_playlists(self) -> None:
+        """Fill the sidebar with local playlists plus, when an account is
+        connected, the account's own playlists (incl. Liked Music)."""
+
+        def work():
+            local = self.library.playlists()
+            try:
+                remote = self.api.library_playlists()
+            except Exception:  # noqa: BLE001 — sidebar must never fail hard
+                remote = []
+            return local, remote
+
+        def present(data) -> None:
+            local, remote = data
+            self.playlist_list.remove_all()
+            for pid, name, count in local:
+                plural = "song" if count == 1 else "songs"
+                self._add_playlist_row(
+                    name, f"{count} {plural} · local", "local", (pid, name))
+            for pl in remote:
+                self._add_playlist_row(
+                    pl.title, pl.author or "YouTube Music", "remote",
+                    pl.playlist_id)
+
+        run_async(work, present, lambda _e: None, name="riff-sidebar-pl")
+
+    def _add_playlist_row(self, title: str, subtitle: str,
+                          kind: str, ref) -> None:
+        from gi.repository import Pango
+
+        row = Gtk.ListBoxRow()
+        row.kind = kind
+        row.ref = ref
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        box.set_margin_top(5)
+        box.set_margin_bottom(5)
+        box.set_margin_start(8)
+        t = Gtk.Label(label=title)
+        t.set_xalign(0.0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        t.add_css_class("heading")
+        s = Gtk.Label(label=subtitle)
+        s.set_xalign(0.0)
+        s.set_ellipsize(Pango.EllipsizeMode.END)
+        s.add_css_class("dim-label")
+        s.add_css_class("caption")
+        box.append(t)
+        box.append(s)
+        row.set_child(box)
+        self.playlist_list.append(row)
+
+    def _on_sidebar_playlist(self, _lb, row) -> None:
+        if row.kind == "local":
+            pid, name = row.ref
+            self.open_local_playlist(pid, name)
+        else:
+            self.open_playlist(row.ref)
+
     def _on_queue_toggle(self, btn) -> None:
         self.queue_split.set_show_sidebar(btn.get_active())
 
@@ -277,6 +365,7 @@ class MainWindow(Adw.ApplicationWindow):
             row.connect("activated", lambda _r, pid=pid: (
                 self.library.add_to_playlist(pid, track),
                 self.toast("Added to playlist"),
+                self.reload_sidebar_playlists(),
                 dialog.close()))
             listbox.append(row)
         if playlists:
@@ -288,7 +377,8 @@ class MainWindow(Adw.ApplicationWindow):
             self.prompt_text("New Playlist", "Name", lambda name: (
                 self.library.add_to_playlist(
                     self.library.create_playlist(name), track),
-                self.toast(f"Added to “{name}”")))))
+                self.toast(f"Added to “{name}”"),
+                self.reload_sidebar_playlists()))))
         box.append(new_btn)
         dialog.set_extra_child(box)
         dialog.add_response("cancel", "Cancel")

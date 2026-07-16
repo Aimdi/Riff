@@ -1,6 +1,6 @@
-## Riff 0.2.4 🎵
+## Riff 0.2.5 🎵
 
-Fixes the Explore page erroring out: charts and mood/genre categories now load independently (one failing no longer blanks the whole page), public browse endpoints automatically retry anonymously when the account-authenticated request fails, and if everything truly fails the page shows the underlying error with a retry button.
+The left sidebar now lists your playlists like YouTube Music: a "＋ New playlist" button, your local Riff playlists, and — when your account is connected — your YouTube Music playlists including Liked Music. Click any to open it; the list updates as you create/rename/delete playlists. The sidebar scrolls when the list grows.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

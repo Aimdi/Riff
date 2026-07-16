@@ -586,18 +586,21 @@ class PlaylistsPage(ContentPage):
         self.window.prompt_text(
             "New Playlist", "Name",
             lambda name: (self.window.library.create_playlist(name),
-                          self.refresh()))
+                          self.refresh(),
+                          self.window.reload_sidebar_playlists()))
 
     def _on_rename(self, _btn, pid: int) -> None:
         self.window.prompt_text(
             "Rename Playlist", "New name",
             lambda name: (self.window.library.rename_playlist(pid, name),
-                          self.refresh()),
+                          self.refresh(),
+                          self.window.reload_sidebar_playlists()),
             accept_label="Rename")
 
     def _on_delete(self, _btn, pid: int) -> None:
         self.window.library.delete_playlist(pid)
         self.refresh()
+        self.window.reload_sidebar_playlists()
 
     def _on_open(self, _row, pid: int, name: str) -> None:
         self.window.open_local_playlist(pid, name)
