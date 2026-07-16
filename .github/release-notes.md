@@ -1,6 +1,6 @@
-## Riff 0.3.1 🎵
+## Riff 0.3.2 🎵
 
-AI Mix now supports **OpenAI-compatible endpoints** alongside Anthropic: pick the provider in Settings and point it at OpenAI, OpenRouter, Groq, or a fully local server (Ollama at http://localhost:11434/v1 with an empty key, LM Studio, …) with your own base URL, key, and model. Implemented over plain HTTP — no extra package required; tolerates servers without JSON response-format support.
+Adds `riff-update` — update Riff with a single command. It fetches the latest source into ~/.cache/riff, skips the rebuild when you are already current, and reinstalls the same way you originally installed (pacman package rebuild via makepkg, or the install.sh virtualenv). `riff-update --force` rebuilds regardless.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

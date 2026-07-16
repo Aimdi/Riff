@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# riff-update — update Riff to the latest version with one command.
+#
+# Keeps its own clone under ~/.cache/riff/update-src, so it works no matter
+# where (or whether) you originally cloned the repo. Rebuilds the pacman
+# package when riff-player is installed via pacman, otherwise updates the
+# install.sh virtualenv.
+set -euo pipefail
+
+REPO="${RIFF_UPDATE_REPO:-https://github.com/aimdi/player.git}"
+SRC="${RIFF_UPDATE_SRC:-${XDG_CACHE_HOME:-$HOME/.cache}/riff/update-src}"
+FORCE=0
+[ "${1:-}" = "--force" ] && FORCE=1
+
+echo "==> Fetching latest Riff…"
+if [ -d "$SRC/.git" ]; then
+    git -C "$SRC" fetch --quiet origin
+    git -C "$SRC" reset --quiet --hard origin/HEAD
+else
+    mkdir -p "$(dirname "$SRC")"
+    git clone --quiet --depth 1 "$REPO" "$SRC"
+fi
+
+NEW_VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/riff/__init__.py")
+CURRENT_VERSION=$(riff --version 2>/dev/null | awk '{print $2}' || true)
+
+echo "==> Installed: ${CURRENT_VERSION:-none}   Latest: $NEW_VERSION"
+if [ "$FORCE" -eq 0 ] && [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+    echo "Already up to date. (Use 'riff-update --force' to rebuild anyway.)"
+    exit 0
+fi
+
+if command -v pacman >/dev/null && pacman -Q riff-player >/dev/null 2>&1; then
+    echo "==> Rebuilding pacman package (makepkg will ask for sudo)…"
+    cd "$SRC/packaging"
+    makepkg -si --noconfirm
+elif [ -x "${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv/bin/pip" ]; then
+    VENV="${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv"
+    echo "==> Updating virtualenv install at $VENV…"
+    "$VENV/bin/pip" install --quiet --upgrade ytmusicapi yt-dlp
+    "$VENV/bin/pip" install --quiet --no-deps --force-reinstall "$SRC"
+else
+    echo "Couldn't find a Riff installation to update." >&2
+    echo "Install first: cd $SRC && ./install.sh   (or: cd packaging && makepkg -si)" >&2
+    exit 1
+fi
+
+echo
+echo "Done! Riff is now $NEW_VERSION — restart the app to use it."

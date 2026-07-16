@@ -35,6 +35,7 @@ mkdir -p "$BIN_DIR" \
     "$APP_DIR/applications" \
     "$APP_DIR/icons/hicolor/scalable/apps"
 ln -sf "$VENV/bin/riff" "$BIN_DIR/riff"
+install -m755 "$SRC_DIR/packaging/riff-update" "$BIN_DIR/riff-update"
 cp "$SRC_DIR/data/io.github.aimdi.Riff.desktop" "$APP_DIR/applications/"
 cp "$SRC_DIR/data/io.github.aimdi.Riff.svg" \
     "$APP_DIR/icons/hicolor/scalable/apps/"

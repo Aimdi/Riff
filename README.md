@@ -57,6 +57,18 @@ rm -rf ~/.local/share/riff-venv ~/.local/bin/riff \
        ~/.local/share/applications/io.github.aimdi.Riff.desktop
 ```
 
+### Updating
+
+After installing (either way), updating is one command:
+
+```bash
+riff-update
+```
+
+It fetches the latest release, tells you if you're already current, and
+rebuilds/reinstalls the same way you originally installed (pacman package
+or virtualenv). `riff-update --force` rebuilds even when up to date.
+
 ### Run from source (any distro)
 
 ```bash
