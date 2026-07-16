@@ -7,12 +7,15 @@ from gi.repository import Adw, Gio, Gtk
 from .. import APP_NAME, config
 from ..core.models import Track
 from ..util import run_async
+from ..core import lyrics as lyrics_mod
 from .pages import (
     AlbumPage,
     ArtistPage,
+    ExplorePage,
     HomePage,
     LibraryPage,
     LocalPlaylistPage,
+    MoodPage,
     PlaylistPage,
     PlaylistsPage,
     SearchPage,
@@ -39,10 +42,16 @@ CSS = b"""
     padding: 8px;
     border-radius: 12px;
 }
+.riff-lyric-current {
+    color: @accent_color;
+    font-weight: 700;
+    font-size: 1.1em;
+}
 """
 
 SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
+    ("explore", "Explore", "web-browser-symbolic"),
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
@@ -69,6 +78,7 @@ class MainWindow(Adw.ApplicationWindow):
         # pages -----------------------------------------------------------
         self.pages = {
             "home": HomePage(self),
+            "explore": ExplorePage(self),
             "search": SearchPage(self),
             "favorites": LibraryPage(self, "favorites"),
             "history": LibraryPage(self, "history"),
@@ -212,6 +222,9 @@ class MainWindow(Adw.ApplicationWindow):
     def open_local_playlist(self, playlist_id: int, name: str) -> None:
         self._push(LocalPlaylistPage(self, playlist_id, name), name)
 
+    def open_mood(self, title: str, params: str) -> None:
+        self._push(MoodPage(self, title, params), title)
+
     def _on_queue_toggle(self, btn) -> None:
         self.queue_split.set_show_sidebar(btn.get_active())
 
@@ -220,14 +233,15 @@ class MainWindow(Adw.ApplicationWindow):
     def toast(self, message: str) -> None:
         self.toaster.add_toast(Adw.Toast.new(str(message)))
 
-    def prompt_text(self, title: str, placeholder: str, on_accept) -> None:
+    def prompt_text(self, title: str, placeholder: str, on_accept,
+                    accept_label: str = "Create") -> None:
         dialog = Adw.AlertDialog.new(title, None)
         entry = Gtk.Entry()
         entry.set_placeholder_text(placeholder)
         entry.set_margin_top(6)
         dialog.set_extra_child(entry)
         dialog.add_response("cancel", "Cancel")
-        dialog.add_response("ok", "Create")
+        dialog.add_response("ok", accept_label)
         dialog.set_response_appearance("ok", Adw.ResponseAppearance.SUGGESTED)
         dialog.set_default_response("ok")
 
@@ -291,30 +305,98 @@ class MainWindow(Adw.ApplicationWindow):
             self.toast("Nothing is playing")
             return
 
-        def present(lyrics: str) -> None:
-            dialog = Adw.Dialog.new()
-            dialog.set_title(f"Lyrics — {track.title}")
-            dialog.set_content_width(460)
-            dialog.set_content_height(600)
-            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            box.append(Adw.HeaderBar())
-            label = Gtk.Label(label=lyrics or "No lyrics found for this song.")
-            label.set_wrap(True)
-            label.set_margin_top(12)
-            label.set_margin_bottom(24)
-            label.set_margin_start(24)
-            label.set_margin_end(24)
-            label.set_selectable(True)
-            sw = Gtk.ScrolledWindow()
-            sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-            sw.set_vexpand(True)
-            sw.set_child(label)
-            box.append(sw)
-            dialog.set_child(box)
-            dialog.present(self)
+        def work():
+            synced, plain = lyrics_mod.fetch_lyrics(track)
+            if not synced and not plain:
+                plain = self.api.lyrics(track.video_id)
+            return synced, plain
 
-        run_async(lambda: self.api.lyrics(track.video_id), present,
-                  lambda _e: self.toast("Couldn't fetch lyrics"))
+        def present(result) -> None:
+            synced, plain = result
+            if synced:
+                self._lyrics_dialog_synced(track, synced)
+            else:
+                self._lyrics_dialog_plain(track, plain)
+
+        run_async(work, present, lambda _e: self.toast("Couldn't fetch lyrics"))
+
+    def _lyrics_dialog(self, track: Track, content: Gtk.Widget) -> Adw.Dialog:
+        dialog = Adw.Dialog.new()
+        dialog.set_title(f"Lyrics — {track.title}")
+        dialog.set_content_width(480)
+        dialog.set_content_height(620)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.append(Adw.HeaderBar())
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sw.set_vexpand(True)
+        sw.set_child(content)
+        box.append(sw)
+        dialog.set_child(box)
+        return dialog
+
+    def _lyrics_dialog_plain(self, track: Track, text: str) -> None:
+        label = Gtk.Label(label=text or "No lyrics found for this song.")
+        label.set_wrap(True)
+        label.set_margin_top(12)
+        label.set_margin_bottom(24)
+        label.set_margin_start(24)
+        label.set_margin_end(24)
+        label.set_selectable(True)
+        self._lyrics_dialog(track, label).present(self)
+
+    def _lyrics_dialog_synced(self, track: Track,
+                              lines: list[tuple[float, str]]) -> None:
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.set_margin_top(12)
+        listbox.set_margin_bottom(24)
+        listbox.set_margin_start(16)
+        listbox.set_margin_end(16)
+        labels: list[Gtk.Label] = []
+        for ts, text in lines:
+            row = Gtk.ListBoxRow()
+            row.timestamp = ts
+            label = Gtk.Label(label=text or "♪")
+            label.set_wrap(True)
+            label.set_xalign(0.0)
+            label.set_margin_top(4)
+            label.set_margin_bottom(4)
+            label.add_css_class("dim-label")
+            row.set_child(label)
+            listbox.append(row)
+            labels.append(label)
+        listbox.connect(
+            "row-activated",
+            lambda _lb, row: self.service.seek(row.timestamp))
+
+        dialog = self._lyrics_dialog(track, listbox)
+        state = {"idx": -1}
+
+        def on_position(pos: float) -> None:
+            idx = lyrics_mod.line_index_at(lines, pos)
+            if idx == state["idx"]:
+                return
+            if 0 <= state["idx"] < len(labels):
+                labels[state["idx"]].remove_css_class("riff-lyric-current")
+                labels[state["idx"]].add_css_class("dim-label")
+            state["idx"] = idx
+            if 0 <= idx < len(labels):
+                labels[idx].remove_css_class("dim-label")
+                labels[idx].add_css_class("riff-lyric-current")
+                row = listbox.get_row_at_index(idx)
+                scroller = listbox.get_ancestor(Gtk.ScrolledWindow)
+                if row is not None and scroller is not None:
+                    # keep the active line roughly centered
+                    vadj = scroller.get_vadjustment()
+                    target = row.get_allocation().y
+                    vadj.set_value(max(0.0, target - vadj.get_page_size() / 2.5))
+
+        self.service.position_listeners.append(on_position)
+        dialog.connect(
+            "closed",
+            lambda *_: self.service.position_listeners.remove(on_position))
+        dialog.present(self)
 
     def show_about(self) -> None:
         from .. import __version__

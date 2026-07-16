@@ -238,6 +238,50 @@ class MusicApi:
             tracks=tracks,
         )
 
+    # -- explore -------------------------------------------------------------
+
+    def mood_categories(self) -> list[tuple[str, list[tuple[str, str]]]]:
+        """[(section title, [(category title, params), …]), …]"""
+        out = []
+        for section, cats in (self.yt.get_mood_categories() or {}).items():
+            items = [
+                (c.get("title") or "", c.get("params") or "")
+                for c in cats or []
+                if c.get("params")
+            ]
+            if items:
+                out.append((section, items))
+        return out
+
+    def mood_playlists(self, params: str) -> list[Playlist]:
+        out = []
+        for p in self.yt.get_mood_playlists(params) or []:
+            if not p.get("playlistId"):
+                continue
+            out.append(
+                Playlist(
+                    playlist_id=p["playlistId"],
+                    title=p.get("title") or "",
+                    author=p.get("description") or "",
+                    thumbnail=_best_thumbnail(p.get("thumbnails")),
+                )
+            )
+        return out
+
+    def charts(self) -> list[Track]:
+        """Global top songs; empty list when charts are unavailable."""
+        try:
+            data = self.yt.get_charts(country="ZZ")
+        except Exception:  # noqa: BLE001 — some locales/accounts lack charts
+            log.debug("charts unavailable", exc_info=True)
+            return []
+        tracks = []
+        for v in (data.get("videos") or {}).get("items") or []:
+            track = Track.from_yt(v)
+            if track.video_id:
+                tracks.append(track)
+        return tracks
+
     # -- radio / related ----------------------------------------------------
 
     def radio(self, video_id: str, limit: int = 25) -> list[Track]:

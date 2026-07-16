@@ -1,6 +1,13 @@
-## Riff 0.1.3 🎵
+## Riff 0.2.0 🎵
 
-Song actions are now always reachable: the player bar gets a full song menu (favorite, add to playlist, download, start radio, go to album/artist) for whatever is currently playing, and every queue row gets the same menu — previously these only existed on song rows in search/album/playlist lists.
+Big discovery + lyrics update, inspired by Snowify:
+
+- **Explore page**: global top songs and public playlists browsable by mood and genre — playlist recommendations without an account
+- **Synced lyrics** from LRCLIB with live line highlighting and click-to-seek (falls back to YouTube Music lyrics)
+- **Follow artists**: Follow button on artist pages; their newest releases appear in a "New from artists you follow" section on Home
+- **Drag & drop queue reordering**
+- Playlist **rename** and cover art on the playlists page
+- New shortcuts: `/` focuses search, `Shift+←/→` seeks ±10s
 
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 

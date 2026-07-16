@@ -65,6 +65,18 @@ def test_playlists(lib):
     assert lib.playlists() == []
 
 
+def test_follows(lib):
+    assert lib.followed_artists() == []
+    lib.follow_artist("UC1", "Daft Punk", "http://thumb")
+    lib.follow_artist("UC2", "Boards of Canada")
+    assert lib.is_followed("UC1")
+    ids = [f[0] for f in lib.followed_artists()]
+    assert set(ids) == {"UC1", "UC2"}
+    lib.unfollow_artist("UC1")
+    assert not lib.is_followed("UC1")
+    assert len(lib.followed_artists()) == 1
+
+
 def test_downloads(lib, tmp_path):
     t = track(5)
     path = str(tmp_path / "song.m4a")

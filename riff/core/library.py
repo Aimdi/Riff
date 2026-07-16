@@ -44,6 +44,12 @@ CREATE TABLE IF NOT EXISTS downloads (
     path TEXT NOT NULL,
     downloaded_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS follows (
+    browse_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    thumbnail TEXT NOT NULL DEFAULT '',
+    followed_at REAL NOT NULL
+);
 """
 
 
@@ -191,6 +197,36 @@ class Library:
                 "WHERE playlist_id = ? AND position > ?",
                 (playlist_id, position),
             )
+
+    # -- followed artists ------------------------------------------------------
+
+    def follow_artist(self, browse_id: str, name: str, thumbnail: str = "") -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO follows (browse_id, name, thumbnail, followed_at) "
+                "VALUES (?,?,?,?)",
+                (browse_id, name, thumbnail, time.time()),
+            )
+
+    def unfollow_artist(self, browse_id: str) -> None:
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM follows WHERE browse_id = ?", (browse_id,))
+
+    def is_followed(self, browse_id: str) -> bool:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM follows WHERE browse_id = ?", (browse_id,)
+            ).fetchone()
+        return row is not None
+
+    def followed_artists(self) -> list[tuple[str, str, str]]:
+        """[(browse_id, name, thumbnail)] most recently followed first."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT browse_id, name, thumbnail FROM follows "
+                "ORDER BY followed_at DESC"
+            ).fetchall()
+        return [(r[0], r[1], r[2]) for r in rows]
 
     # -- downloads -----------------------------------------------------------
 

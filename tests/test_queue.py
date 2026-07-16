@@ -95,6 +95,24 @@ def test_remove_current():
     assert q.current.video_id == "v1"
 
 
+def test_move_reorders_and_tracks_position():
+    q = PlayQueue()
+    q.set_tracks(tracks(4))
+    q.next()  # current = v1 at index 1
+    q.move(3, 0)  # v3 to front
+    assert [t.video_id for t in q.tracks] == ["v3", "v0", "v1", "v2"]
+    assert q.current.video_id == "v1"
+    assert q.current_index == 2
+    q.move(2, 3)  # move current itself
+    assert q.current.video_id == "v1"
+    assert q.current_index == 3
+    # invalid moves are no-ops
+    q.move(0, 0)
+    q.move(-1, 2)
+    q.move(1, 99)
+    assert len(q.tracks) == 4
+
+
 def test_jump_to_and_peek():
     q = PlayQueue()
     q.set_tracks(tracks(4))

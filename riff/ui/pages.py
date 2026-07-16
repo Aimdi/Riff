@@ -63,6 +63,7 @@ class HomePage(ContentPage):
     def __init__(self, window):
         super().__init__(window)
         self._loaded = False
+        self._box: Gtk.Box | None = None
 
     def refresh(self, force: bool = False) -> None:
         if self._loaded and not force:
@@ -94,7 +95,35 @@ class HomePage(ContentPage):
                 tl = TrackList(self.window, radio_on_single=True)
                 tl.set_tracks(tracks[:10])
                 box.append(tl)
+        self._box = box
         self.show_widget(scroll_wrap(box))
+        self._load_followed_releases(box)
+
+    def _load_followed_releases(self, box: Gtk.Box) -> None:
+        """Prepend a 'new from your artists' carousel once it's fetched."""
+        follows = self.window.library.followed_artists()[:6]
+        if not follows:
+            return
+
+        def work():
+            items, seen = [], set()
+            for browse_id, _name, _thumb in follows:
+                try:
+                    artist = self.window.api.artist(browse_id)
+                except Exception:  # noqa: BLE001 — one artist must not kill all
+                    continue
+                for album in (artist.albums + artist.singles)[:2]:
+                    if album.browse_id not in seen:
+                        seen.add(album.browse_id)
+                        items.append(album)
+            return items
+
+        def done(items) -> None:
+            if items and box is self._box:
+                box.prepend(Carousel(
+                    "New from artists you follow", items, self.window))
+
+        run_async(work, done, lambda _e: None, name="riff-follows")
 
 
 class SearchPage(ContentPage):
@@ -201,6 +230,81 @@ class SearchPage(ContentPage):
                 f"Nothing found for “{self._query}”."))
 
 
+class ExplorePage(ContentPage):
+    """Public discovery without an account: charts and mood/genre playlists."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._loaded = False
+
+    def refresh(self, force: bool = False) -> None:
+        if self._loaded and not force:
+            return
+
+        def work():
+            api = self.window.api
+            return api.charts(), api.mood_categories()
+
+        self.load_async(work, self._present)
+
+    def _present(self, data) -> None:
+        self._loaded = True
+        charts, categories = data
+        if not charts and not categories:
+            self.show_widget(status_page(
+                "web-browser-symbolic", "Explore is unavailable",
+                "Couldn't load charts or categories right now."))
+            return
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        if charts:
+            title = Gtk.Label(label="Top songs worldwide")
+            title.add_css_class("title-3")
+            title.set_xalign(0.0)
+            box.append(title)
+            tl = TrackList(self.window, numbered=True, radio_on_single=True)
+            tl.set_tracks(charts[:15])
+            box.append(tl)
+        for section, cats in categories:
+            title = Gtk.Label(label=section)
+            title.add_css_class("title-3")
+            title.set_xalign(0.0)
+            title.set_margin_top(8)
+            box.append(title)
+            flow = Gtk.FlowBox()
+            flow.set_selection_mode(Gtk.SelectionMode.NONE)
+            flow.set_max_children_per_line(10)
+            flow.set_column_spacing(8)
+            flow.set_row_spacing(8)
+            for cat_title, params in cats:
+                chip = Gtk.Button(label=cat_title)
+                chip.add_css_class("pill")
+                chip.connect("clicked", self._on_category, cat_title, params)
+                flow.append(chip)
+            box.append(flow)
+        self.show_widget(scroll_wrap(_padded(box)))
+
+    def _on_category(self, _btn, title: str, params: str) -> None:
+        self.window.open_mood(title, params)
+
+
+class MoodPage(ContentPage):
+    """Grid of public playlists for one mood/genre category."""
+
+    def __init__(self, window, title: str, params: str):
+        super().__init__(window)
+        self.load_async(
+            lambda: window.api.mood_playlists(params), self._present)
+        self._title = title
+
+    def _present(self, playlists) -> None:
+        if not playlists:
+            self.show_widget(status_page(
+                "view-list-symbolic", self._title, "No playlists found here."))
+            return
+        grid = CardGrid(playlists, self.window)
+        self.show_widget(scroll_wrap(_padded(grid)))
+
+
 def _padded(child: Gtk.Widget) -> Gtk.Box:
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
     box.set_margin_top(12)
@@ -215,7 +319,8 @@ class _DetailPage(ContentPage):
     """Shared layout for album and playlist pages."""
 
     def _header(self, thumbnail: str, title: str, subtitle: str,
-                tracks: list[Track], circular: bool = False) -> Gtk.Widget:
+                tracks: list[Track], circular: bool = False,
+                extra_button: Gtk.Widget | None = None) -> Gtk.Widget:
         box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=20)
         art = CoverArt(180, circular=circular)
         art.set_url(thumbnail)
@@ -260,6 +365,8 @@ class _DetailPage(ContentPage):
                       (self.window.service.add_to_queue(tracks),
                        self.window.toast("Added to queue")))
         buttons.append(queue)
+        if extra_button is not None:
+            buttons.append(extra_button)
 
         info.append(buttons)
         box.append(info)
@@ -326,7 +433,8 @@ class ArtistPage(_DetailPage):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         box.append(self._header(
             artist.thumbnail, artist.name, "Artist",
-            artist.songs, circular=True))
+            artist.songs, circular=True,
+            extra_button=self._follow_button(artist)))
         if artist.songs:
             title = Gtk.Label(label="Top Songs")
             title.add_css_class("title-3")
@@ -340,6 +448,27 @@ class ArtistPage(_DetailPage):
         if artist.singles:
             box.append(Carousel("Singles & EPs", artist.singles, self.window))
         self.show_widget(scroll_wrap(_padded(box)))
+
+    def _follow_button(self, artist: Artist) -> Gtk.ToggleButton:
+        btn = Gtk.ToggleButton()
+        btn.add_css_class("pill")
+        library = self.window.library
+        btn.set_active(library.is_followed(artist.browse_id))
+        btn.set_label("Following" if btn.get_active() else "Follow")
+
+        def on_toggled(b: Gtk.ToggleButton) -> None:
+            if b.get_active():
+                library.follow_artist(
+                    artist.browse_id, artist.name, artist.thumbnail)
+                self.window.toast(
+                    f"Following {artist.name} — new releases appear on Home")
+            else:
+                library.unfollow_artist(artist.browse_id)
+                self.window.toast(f"Unfollowed {artist.name}")
+            b.set_label("Following" if b.get_active() else "Follow")
+
+        btn.connect("toggled", on_toggled)
+        return btn
 
 
 class LibraryPage(ContentPage):
@@ -382,9 +511,18 @@ class PlaylistsPage(ContentPage):
         super().__init__(window)
 
     def refresh(self) -> None:
-        self.load_async(self.window.library.playlists, self._present)
+        def work():
+            playlists = self.window.library.playlists()
+            covers = {}
+            for pid, _name, _count in playlists:
+                tracks = self.window.library.playlist_tracks(pid)
+                covers[pid] = tracks[0].thumbnail if tracks else ""
+            return playlists, covers
 
-    def _present(self, playlists: list[tuple[int, str, int]]) -> None:
+        self.load_async(work, self._present)
+
+    def _present(self, data) -> None:
+        playlists, covers = data
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
 
         new_btn = Gtk.Button()
@@ -403,11 +541,20 @@ class PlaylistsPage(ContentPage):
                 row.set_title(name)
                 row.set_subtitle(f"{count} songs")
                 row.set_activatable(True)
-                icon = Gtk.Image.new_from_icon_name("view-list-symbolic")
-                row.add_prefix(icon)
+                art = CoverArt(44, icon="view-list-symbolic")
+                art.set_url(covers.get(pid, ""))
+                art.set_valign(Gtk.Align.CENTER)
+                row.add_prefix(art)
+                rename = Gtk.Button.new_from_icon_name("document-edit-symbolic")
+                rename.add_css_class("flat")
+                rename.set_valign(Gtk.Align.CENTER)
+                rename.set_tooltip_text("Rename")
+                rename.connect("clicked", self._on_rename, pid)
+                row.add_suffix(rename)
                 delete = Gtk.Button.new_from_icon_name("user-trash-symbolic")
                 delete.add_css_class("flat")
                 delete.set_valign(Gtk.Align.CENTER)
+                delete.set_tooltip_text("Delete")
                 delete.connect("clicked", self._on_delete, pid)
                 row.add_suffix(delete)
                 row.connect("activated", self._on_open, pid, name)
@@ -424,6 +571,13 @@ class PlaylistsPage(ContentPage):
             "New Playlist", "Name",
             lambda name: (self.window.library.create_playlist(name),
                           self.refresh()))
+
+    def _on_rename(self, _btn, pid: int) -> None:
+        self.window.prompt_text(
+            "Rename Playlist", "New name",
+            lambda name: (self.window.library.rename_playlist(pid, name),
+                          self.refresh()),
+            accept_label="Rename")
 
     def _on_delete(self, _btn, pid: int) -> None:
         self.window.library.delete_playlist(pid)

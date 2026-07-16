@@ -12,12 +12,15 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
 
 - 🔍 **Search** songs, albums, artists and playlists on YouTube Music
 - 🏠 **Home feed** with charts, moods and personalized-style recommendations
+- 🧭 **Explore** — global top songs plus public playlists by mood and genre
 - 📻 **Radio / autoplay** — when your queue runs out, related songs keep playing
-- 🗒️ **Full queue control** — play next, add to queue, reorder-by-jump, shuffle,
+- 🗒️ **Full queue control** — play next, add to queue, drag to reorder, shuffle,
   repeat (off / all / one)
 - ❤️ **Favorites, history and local playlists**, stored in a local SQLite database
+- 👥 **Follow artists** — their newest releases appear on your Home page
 - ⬇️ **Offline downloads** (best-audio via yt-dlp); downloaded songs play from disk
-- 🎤 **Lyrics** for the current song
+- 🎤 **Synced lyrics** (LRCLIB) with live highlighting and tap-to-seek,
+  falling back to YouTube Music lyrics
 - 🎧 **Gapless-ready mpv audio engine** with stream prefetching for instant
   track changes
 - 🖥️ **MPRIS integration** — media keys, GNOME/KDE media widgets and
@@ -77,8 +80,11 @@ python -m riff
 | Create a playlist | Sidebar → *Playlists* → **New Playlist** |
 | Add a song to a playlist | ⋮ menu on the song → *Add to Playlist…* |
 | Download for offline | ⋮ menu → *Download* |
-| Lyrics | Header menu → *Lyrics* |
-| Shortcuts | `Space` play/pause · `Ctrl+←/→` prev/next · `Ctrl+F` search · `Ctrl+Q` quit |
+| Discover public playlists | Sidebar → *Explore* → pick a mood or genre |
+| Follow an artist | Open the artist page → **Follow** |
+| Reorder the queue | Drag a queue row onto another |
+| Lyrics (synced) | Header menu → *Lyrics*; click a line to seek |
+| Shortcuts | `Space` play/pause · `Ctrl+←/→` prev/next · `Shift+←/→` seek ±10s · `Ctrl+F` or `/` search · `Ctrl+Q` quit |
 
 ### Connect your YouTube Music account (optional)
 

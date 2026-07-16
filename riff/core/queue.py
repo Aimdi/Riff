@@ -98,6 +98,21 @@ class PlayQueue:
             self._pos = min(self._pos, len(self._order) - 1)
         self._notify()
 
+    def move(self, src: int, dst: int) -> None:
+        """Move the track at play-order position `src` to position `dst`."""
+        n = len(self._order)
+        if src == dst or not (0 <= src < n) or not (0 <= dst < n):
+            return
+        item = self._order.pop(src)
+        self._order.insert(dst, item)
+        if src == self._pos:
+            self._pos = dst
+        elif src < self._pos <= dst:
+            self._pos -= 1
+        elif dst <= self._pos < src:
+            self._pos += 1
+        self._notify()
+
     def jump_to(self, order_index: int) -> Track | None:
         if 0 <= order_index < len(self._order):
             self._pos = order_index

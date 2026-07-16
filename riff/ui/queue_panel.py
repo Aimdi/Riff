@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gi.repository import Gtk, Pango
+from gi.repository import Gdk, GObject, Gtk, Pango
 
 from .widgets import CoverArt, build_track_menu
 
@@ -106,7 +106,30 @@ class QueuePanel(Gtk.Box):
             box.append(remove)
 
             row.set_child(box)
+            self._make_draggable(row, i)
             self.listbox.append(row)
+
+    def _make_draggable(self, row: Gtk.ListBoxRow, index: int) -> None:
+        """Drag a row onto another row to reorder the queue."""
+        source = Gtk.DragSource()
+        source.set_actions(Gdk.DragAction.MOVE)
+        source.connect(
+            "prepare",
+            lambda _s, _x, _y, i=index:
+                Gdk.ContentProvider.new_for_value(str(i)))
+        row.add_controller(source)
+
+        target = Gtk.DropTarget.new(GObject.TYPE_STRING, Gdk.DragAction.MOVE)
+        target.connect("drop", self._on_drop, index)
+        row.add_controller(target)
+
+    def _on_drop(self, _target, value, _x, _y, dest_index: int) -> bool:
+        try:
+            src_index = int(value)
+        except (TypeError, ValueError):
+            return False
+        self.service.queue.move(src_index, dest_index)
+        return True
 
     def _on_activated(self, _lb, row: Gtk.ListBoxRow) -> None:
         self.service.play_from_queue(row.get_index())

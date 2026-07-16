@@ -70,8 +70,12 @@ class RiffApplication(Adw.Application):
         add("play-pause", svc.toggle_pause, "space")
         add("next", svc.next, "<Ctrl>Right")
         add("previous", svc.previous, "<Ctrl>Left")
+        add("seek-forward",
+            lambda: svc.seek(svc.engine.position + 10), "<Shift>Right")
+        add("seek-back",
+            lambda: svc.seek(max(0.0, svc.engine.position - 10)), "<Shift>Left")
         add("quit", self.quit, "<Ctrl>q")
-        add("search", self._focus_search, "<Ctrl>f")
+        add("search", self._focus_search, "<Ctrl>f", "slash")
 
     def _focus_search(self) -> None:
         if self.window:
