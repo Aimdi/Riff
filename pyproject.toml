@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "riff-player"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Native YouTube Music player for Linux (GTK4 + libadwaita + mpv)"
 readme = "README.md"
 license = { text = "GPL-3.0-or-later" }
@@ -34,6 +34,9 @@ dev = ["pytest"]
 
 [tool.setuptools.packages.find]
 include = ["riff*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "riff.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
