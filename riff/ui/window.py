@@ -45,6 +45,16 @@ CSS = b"""
     background-color: @headerbar_bg_color;
     border-top: 1px solid @borders;
 }
+/* Compact Home “For you” chips */
+button.riff-for-you-chip {
+    padding: 0;
+    min-height: 0;
+    border-radius: 10px;
+    background-color: alpha(currentColor, 0.06);
+}
+button.riff-for-you-chip:hover {
+    background-color: alpha(currentColor, 0.12);
+}
 /* Keep cover tiles from growing with huge YouTube textures. */
 .riff-cover {
     min-width: 0;

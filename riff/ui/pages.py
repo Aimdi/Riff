@@ -16,6 +16,7 @@ from .widgets import (
     CardGrid,
     Carousel,
     CoverArt,
+    ForYouStrip,
     TrackList,
     scroll_wrap,
     spinner_page,
@@ -146,49 +147,37 @@ class HomePage(ContentPage):
             return
         while child := host.get_first_child():
             host.remove(child)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.set_margin_top(2)
+        row.set_margin_bottom(2)
         title = Gtk.Label(label="For you")
-        title.add_css_class("title-3")
-        title.set_xalign(0.0)
-        host.append(title)
-        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-        row.set_margin_top(6)
+        title.add_css_class("heading")
+        row.append(title)
         spin = Gtk.Spinner()
+        spin.set_size_request(16, 16)
         spin.start()
         row.append(spin)
-        hint = Gtk.Label(label="Picking songs for you…")
+        hint = Gtk.Label(label="Picking songs…")
         hint.add_css_class("dim-label")
+        hint.add_css_class("caption")
         row.append(hint)
         host.append(row)
 
     def show_for_you(self, tracks: list[Track], *, source: str = "ai") -> None:
-        """Paint / replace the For you block (called from Home or AI Mix)."""
+        """Paint a compact horizontal For you strip (not a full track list)."""
         host = self._for_you_host
         if host is None or not tracks:
             return
         while child := host.get_first_child():
             host.remove(child)
 
-        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        title = Gtk.Label(label="For you")
-        title.add_css_class("title-3")
-        title.set_xalign(0.0)
-        title.set_hexpand(True)
-        header.append(title)
         subtitle = {
-            "ai": "AI mix from your taste",
-            "radio": "Based on what you play",
-            "cache": "Your latest mix",
+            "ai": "AI",
+            "radio": "From your taste",
+            "cache": "AI",
         }.get(source, "")
-        if subtitle:
-            sub = Gtk.Label(label=subtitle)
-            sub.add_css_class("dim-label")
-            sub.add_css_class("caption")
-            header.append(sub)
-        host.append(header)
-
-        tl = TrackList(self.window, radio_on_single=True)
-        tl.set_tracks(tracks[:12])
-        host.append(tl)
+        host.append(ForYouStrip(
+            "For you", tracks[:10], self.window, subtitle=subtitle))
 
     def _ensure_for_you(self) -> None:
         """Background: AI Mix if possible, else radio-based picks."""

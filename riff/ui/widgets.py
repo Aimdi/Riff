@@ -364,6 +364,89 @@ class MediaCard(Gtk.FlowBoxChild):
             self._window.service.play_track_with_radio(item)
 
 
+class CompactTrackChip(Gtk.Button):
+    """One short song pill for the Home “For you” strip (~52px tall)."""
+
+    def __init__(self, track: Track, window, playlist: list[Track] | None = None):
+        super().__init__()
+        self.track = track
+        self._window = window
+        self._playlist = playlist or [track]
+        self.add_css_class("flat")
+        self.add_css_class("riff-for-you-chip")
+        self.set_has_frame(False)
+        self.set_valign(Gtk.Align.CENTER)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        row.set_margin_start(4)
+        row.set_margin_end(8)
+        row.set_margin_top(4)
+        row.set_margin_bottom(4)
+        art = CoverArt(40)
+        art.set_url(track.thumbnail)
+        row.append(art)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        text.set_valign(Gtk.Align.CENTER)
+        text.set_size_request(110, -1)
+        title = _ellipsized(track.title, ["heading", "caption"])
+        title.set_max_width_chars(16)
+        title.set_single_line_mode(True)
+        text.append(title)
+        if track.artist:
+            artist = _ellipsized(track.artist, ["dim-label", "caption"])
+            artist.set_max_width_chars(16)
+            artist.set_single_line_mode(True)
+            text.append(artist)
+        row.append(text)
+        self.set_child(row)
+        self.set_tooltip_text(f"{track.title}\n{track.artist}".strip())
+        self.connect("clicked", self._on_clicked)
+
+    def _on_clicked(self, _btn) -> None:
+        tracks = self._playlist
+        try:
+            idx = next(i for i, t in enumerate(tracks)
+                       if t.video_id == self.track.video_id)
+        except StopIteration:
+            idx = 0
+        self._window.service.play_tracks(tracks, start=idx)
+
+
+class ForYouStrip(Gtk.Box):
+    """Compact horizontal “For you” row — one line of chips, not a full list."""
+
+    def __init__(self, title: str, tracks: list[Track], window,
+                 subtitle: str = ""):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self.set_vexpand(False)
+
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        header.set_margin_start(2)
+        t = Gtk.Label(label=title)
+        t.add_css_class("heading")
+        t.set_xalign(0.0)
+        t.set_hexpand(True)
+        header.append(t)
+        if subtitle:
+            s = Gtk.Label(label=subtitle)
+            s.add_css_class("dim-label")
+            s.add_css_class("caption")
+            header.append(s)
+        self.append(header)
+
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroller.set_vexpand(False)
+        scroller.set_propagate_natural_height(True)
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        # Keep the strip short: a handful of chips, swipe for more.
+        playlist = list(tracks[:10])
+        for track in playlist:
+            row.append(CompactTrackChip(track, window, playlist=playlist))
+        scroller.set_child(row)
+        self.append(scroller)
+
+
 class Carousel(Gtk.Box):
     """Titled horizontal scroller of MediaCards."""
 
