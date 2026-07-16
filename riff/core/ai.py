@@ -169,9 +169,14 @@ def suggest_songs(api_key: str, recent: list[Track], favorites: list[Track],
     try:
         import anthropic
     except ImportError as exc:
+        import shutil
+
+        if shutil.which("pacman"):
+            hint = "sudo pacman -S python-anthropic (or: paru -S python-anthropic)"
+        else:
+            hint = "pip install --user anthropic"
         raise RuntimeError(
-            "The 'anthropic' Python package is not installed — "
-            "run: pip install --user anthropic"
+            f"The 'anthropic' Python package is not installed — run: {hint}"
         ) from exc
 
     client = anthropic.Anthropic(api_key=api_key)

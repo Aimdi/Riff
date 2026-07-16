@@ -1,6 +1,6 @@
-## Riff 0.3.2 🎵
+## Riff 0.3.3 🎵
 
-Adds `riff-update` — update Riff with a single command. It fetches the latest source into ~/.cache/riff, skips the rebuild when you are already current, and reinstalls the same way you originally installed (pacman package rebuild via makepkg, or the install.sh virtualenv). `riff-update --force` rebuilds regardless.
+The "anthropic package not installed" message now suggests the correct install command on Arch/CachyOS (`sudo pacman -S python-anthropic` / `paru -S python-anthropic`) instead of a pip command that PEP 668 blocks there.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
