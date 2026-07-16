@@ -98,6 +98,10 @@ class RiffApplication(Adw.Application):
                 self.set_accels_for_action(f"app.{name}", list(accels))
 
         svc = self.service
+        win = self.window
+        bar = win.player_bar
+
+        # playback
         add("play-pause", svc.toggle_pause, "space")
         add("next", svc.next, "<Ctrl>Right")
         add("previous", svc.previous, "<Ctrl>Left")
@@ -105,8 +109,36 @@ class RiffApplication(Adw.Application):
             lambda: svc.seek(svc.engine.position + 10), "<Shift>Right")
         add("seek-back",
             lambda: svc.seek(max(0.0, svc.engine.position - 10)), "<Shift>Left")
+        add("like-current", bar._on_favorite, "<Alt><Shift>b")
+        add("shuffle",
+            lambda: bar.shuffle_btn.set_active(
+                not bar.shuffle_btn.get_active()), "<Alt>s")
+        add("repeat", lambda: bar._on_repeat(None), "<Alt>r")
+        add("volume-up",
+            lambda: bar.volume.set_value(
+                min(100, bar.volume.get_value() + 5)), "<Alt>Up")
+        add("volume-down",
+            lambda: bar.volume.set_value(
+                max(0, bar.volume.get_value() - 5)), "<Alt>Down")
+
+        # navigation
+        add("goto-home", lambda: win.goto("home"), "<Alt><Shift>h")
+        add("goto-favorites", lambda: win.goto("favorites"), "<Alt><Shift>s")
+        add("goto-playlists", lambda: win.goto("playlists"), "<Alt><Shift>1")
+        add("goto-stats", lambda: win.goto("stats"), "<Alt><Shift>t")
+        add("toggle-queue",
+            lambda: bar.queue_btn.set_active(
+                not bar.queue_btn.get_active()), "<Alt><Shift>q")
+
+        # layout & misc
+        add("new-playlist", win.create_playlist_dialog, "<Alt><Shift>p")
+        add("toggle-sidebar", win._toggle_sidebar, "<Alt><Shift>l")
+        add("mini-player", win.open_mini_player, "<Alt><Shift>m")
+        add("lyrics", win.show_lyrics, "<Alt><Shift>y")
+        add("shortcuts", win.show_shortcuts, "<Ctrl>slash", "question")
+        add("settings", win.show_settings, "<Ctrl>comma")
         add("quit", self.quit, "<Ctrl>q")
-        add("search", self._focus_search, "<Ctrl>f", "slash")
+        add("search", self._focus_search, "<Ctrl>f", "slash", "<Ctrl>k")
 
     def _focus_search(self) -> None:
         if self.window:

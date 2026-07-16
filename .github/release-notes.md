@@ -1,6 +1,6 @@
-## Riff 0.6.0 🎵
+## Riff 0.7.0 🎵
 
-Spotify-style collapsible sidebar: the « button at the top shrinks the sidebar into a narrow icon rail — navigation as icons with tooltips, a round ＋ button, and playlists as square cover-art tiles. Expanded mode gains cover thumbnails on playlist rows too. The collapsed/expanded state is remembered across restarts.
+Spotify-style keyboard shortcuts across the app — like (Alt+Shift+B), shuffle (Alt+S), repeat (Alt+R), volume (Alt+↑/↓), page navigation (Alt+Shift+H/S/T/1), queue and sidebar toggles, mini player, and more — with a Keyboard Shortcuts overlay on Ctrl+/ or ? showing everything with keycaps. Plus a profile: click the avatar in the header to set your name and profile picture (shown Spotify-style top right, stored locally).
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

@@ -103,7 +103,7 @@ python -m riff
 | Follow an artist | Open the artist page → **Follow** |
 | Reorder the queue | Drag a queue row onto another |
 | Lyrics (synced) | Header menu → *Lyrics*; click a line to seek |
-| Shortcuts | `Space` play/pause · `Ctrl+←/→` prev/next · `Shift+←/→` seek ±10s · `Ctrl+F` or `/` search · `Ctrl+Q` quit |
+| Shortcuts | Press `Ctrl+/` or `?` for the full list — play/pause, like, shuffle, repeat, seek, volume, page navigation, sidebar/queue/mini-player toggles |
 
 ### Settings
 

@@ -125,12 +125,23 @@ class MainWindow(Adw.ApplicationWindow):
         menu.append("AI Mix", "win.ai-mix")
         menu.append("Lyrics", "win.lyrics")
         menu.append("Mini Player", "win.mini")
+        menu.append("Keyboard Shortcuts", "win.shortcuts")
         menu.append("Settings", "win.settings")
         menu.append("About Riff", "win.about")
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("open-menu-symbolic")
         menu_btn.set_menu_model(menu)
         header.pack_end(menu_btn)
+
+        # profile avatar (Spotify-style, top right)
+        self._avatar = Adw.Avatar.new(28, None, True)
+        avatar_btn = Gtk.Button()
+        avatar_btn.set_child(self._avatar)
+        avatar_btn.add_css_class("flat")
+        avatar_btn.set_tooltip_text("Profile")
+        avatar_btn.connect("clicked", lambda *_: self.show_profile())
+        header.pack_end(avatar_btn)
+        self._refresh_avatar()
 
         content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         content_box.append(header)
@@ -260,6 +271,7 @@ class MainWindow(Adw.ApplicationWindow):
             "settings": self.show_settings,
             "ai-mix": self.start_ai_mix,
             "mini": self.open_mini_player,
+            "shortcuts": self.show_shortcuts,
             "about": self.show_about,
         }
         for name, cb in actions.items():
@@ -605,6 +617,192 @@ class MainWindow(Adw.ApplicationWindow):
         dialog.connect(
             "closed",
             lambda *_: self.service.position_listeners.remove(on_position))
+        dialog.present(self)
+
+    def goto(self, name: str) -> None:
+        """Navigate to a main sidebar page (used by keyboard shortcuts)."""
+        for i, (item, _label, _icon) in enumerate(SIDEBAR_ITEMS):
+            if item == name:
+                row = self.sidebar_list.get_row_at_index(i)
+                self.sidebar_list.select_row(row)
+                self._on_sidebar(self.sidebar_list, row)
+                return
+
+    def create_playlist_dialog(self) -> None:
+        self.prompt_text(
+            "New Playlist", "Name",
+            lambda name: (self.library.create_playlist(name),
+                          self.reload_sidebar_playlists()))
+
+    # -- shortcuts overlay -------------------------------------------------------
+
+    SHORTCUTS = [
+        ("Basic", [
+            ("Create new playlist", "Alt Shift P"),
+            ("Quick search", "Ctrl K"),
+            ("Keyboard shortcuts", "Ctrl /"),
+            ("Settings", "Ctrl ,"),
+            ("Quit", "Ctrl Q"),
+        ]),
+        ("Playback", [
+            ("Play / Pause", "Space"),
+            ("Like (favorite)", "Alt Shift B"),
+            ("Shuffle", "Alt S"),
+            ("Repeat", "Alt R"),
+            ("Skip to previous", "Ctrl ←"),
+            ("Skip to next", "Ctrl →"),
+            ("Seek backward", "Shift ←"),
+            ("Seek forward", "Shift →"),
+            ("Raise volume", "Alt ↑"),
+            ("Lower volume", "Alt ↓"),
+        ]),
+        ("Navigation", [
+            ("Home", "Alt Shift H"),
+            ("Search", "Ctrl F"),
+            ("Liked songs (Favorites)", "Alt Shift S"),
+            ("Queue", "Alt Shift Q"),
+            ("Your playlists", "Alt Shift 1"),
+            ("Stats", "Alt Shift T"),
+        ]),
+        ("Layout", [
+            ("Toggle sidebar rail", "Alt Shift L"),
+            ("Mini player", "Alt Shift M"),
+            ("Lyrics", "Alt Shift Y"),
+        ]),
+    ]
+
+    def show_shortcuts(self) -> None:
+        dialog = Adw.Dialog.new()
+        dialog.set_title("Keyboard Shortcuts")
+        dialog.set_content_width(460)
+        dialog.set_content_height(620)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.append(Adw.HeaderBar())
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        box.set_margin_top(6)
+        box.set_margin_bottom(24)
+        box.set_margin_start(20)
+        box.set_margin_end(20)
+        hint = Gtk.Label(label="Press Ctrl+/ or ? to toggle this dialog.")
+        hint.add_css_class("dim-label")
+        hint.set_xalign(0.0)
+        box.append(hint)
+        for section, items in self.SHORTCUTS:
+            title = Gtk.Label(label=section)
+            title.add_css_class("title-3")
+            title.set_xalign(0.0)
+            title.set_margin_top(10)
+            box.append(title)
+            for name, keys in items:
+                row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+                label = Gtk.Label(label=name)
+                label.set_xalign(0.0)
+                label.set_hexpand(True)
+                row.append(label)
+                for key in keys.split(" "):
+                    cap = Gtk.Label(label=key)
+                    cap.add_css_class("keycap")
+                    row.append(cap)
+                box.append(row)
+        sw = Gtk.ScrolledWindow()
+        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        sw.set_vexpand(True)
+        sw.set_child(box)
+        outer.append(sw)
+        dialog.set_child(outer)
+        dialog.present(self)
+
+    # -- profile --------------------------------------------------------------
+
+    def _refresh_avatar(self) -> None:
+        name = str(config.settings.get("profile_name", "") or "")
+        self._avatar.set_text(name or "Riff")
+        self._avatar.set_show_initials(bool(name))
+        picture = str(config.settings.get("profile_picture", "") or "")
+        if picture:
+            try:
+                from gi.repository import Gdk
+
+                self._avatar.set_custom_image(
+                    Gdk.Texture.new_from_filename(picture))
+            except Exception:  # noqa: BLE001 — file may have moved
+                log.warning("couldn't load profile picture %s", picture)
+
+    def show_profile(self) -> None:
+        dialog = Adw.Dialog.new()
+        dialog.set_title("Profile")
+        dialog.set_content_width(360)
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        outer.append(Adw.HeaderBar())
+
+        big = Adw.Avatar.new(96, None, True)
+        name0 = str(config.settings.get("profile_name", "") or "")
+        big.set_text(name0 or "Riff")
+        big.set_show_initials(bool(name0))
+        pic0 = str(config.settings.get("profile_picture", "") or "")
+        if pic0:
+            try:
+                from gi.repository import Gdk
+
+                big.set_custom_image(Gdk.Texture.new_from_filename(pic0))
+            except Exception:  # noqa: BLE001
+                pass
+        big.set_halign(Gtk.Align.CENTER)
+        outer.append(big)
+
+        name_row = Adw.EntryRow()
+        name_row.set_title("Name")
+        name_row.set_text(name0)
+        name_row.set_show_apply_button(True)
+        name_row.connect("apply", lambda row: (
+            config.settings.set("profile_name", row.get_text().strip()),
+            self._refresh_avatar(),
+            big.set_text(row.get_text().strip() or "Riff"),
+            big.set_show_initials(True)))
+        group = Gtk.ListBox()
+        group.add_css_class("boxed-list")
+        group.set_selection_mode(Gtk.SelectionMode.NONE)
+        group.set_margin_start(16)
+        group.set_margin_end(16)
+        group.append(name_row)
+        outer.append(group)
+
+        choose = Gtk.Button(label="Choose picture…")
+        choose.add_css_class("pill")
+        choose.set_halign(Gtk.Align.CENTER)
+        choose.set_margin_bottom(18)
+
+        def on_choose(_btn) -> None:
+            file_dialog = Gtk.FileDialog()
+            img_filter = Gtk.FileFilter()
+            img_filter.set_name("Images")
+            img_filter.add_mime_type("image/*")
+            filters = Gio.ListStore.new(Gtk.FileFilter)
+            filters.append(img_filter)
+            file_dialog.set_filters(filters)
+
+            def on_open(fd, result) -> None:
+                try:
+                    file = fd.open_finish(result)
+                except Exception:  # noqa: BLE001 — user cancelled
+                    return
+                path = file.get_path()
+                if path:
+                    config.settings.set("profile_picture", path)
+                    self._refresh_avatar()
+                    try:
+                        from gi.repository import Gdk
+
+                        big.set_custom_image(
+                            Gdk.Texture.new_from_filename(path))
+                    except Exception:  # noqa: BLE001
+                        self.toast("Couldn't load that image")
+
+            file_dialog.open(self, None, on_open)
+
+        choose.connect("clicked", on_choose)
+        outer.append(choose)
+        dialog.set_child(outer)
         dialog.present(self)
 
     def open_mini_player(self) -> None:

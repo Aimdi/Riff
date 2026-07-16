@@ -39,6 +39,8 @@ DEFAULTS = {
     "listenbrainz_token": "",
     "local_music_dir": "~/Music",
     "sidebar_collapsed": False,
+    "profile_name": "",
+    "profile_picture": "",
     "window_width": 1100,
     "window_height": 720,
 }
