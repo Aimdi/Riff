@@ -8,7 +8,7 @@
 # the preinstalled AUR helper:   paru -S python-ytmusicapi
 
 pkgname=riff-player
-pkgver=0.2.5
+pkgver=0.3.0
 pkgrel=1
 pkgdesc="Native YouTube Music player (GTK4 + libadwaita + mpv)"
 arch=('any')
@@ -23,6 +23,9 @@ depends=(
   'yt-dlp'
   'python-ytmusicapi'
   'hicolor-icon-theme'
+)
+optdepends=(
+  'python-anthropic: AI Mix — Claude-curated song suggestions'
 )
 makedepends=(
   'python-build'

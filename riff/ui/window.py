@@ -108,7 +108,9 @@ class MainWindow(Adw.ApplicationWindow):
         title = Adw.WindowTitle.new(APP_NAME, "")
         header.set_title_widget(title)
         menu = Gio.Menu()
+        menu.append("AI Mix", "win.ai-mix")
         menu.append("Lyrics", "win.lyrics")
+        menu.append("Settings", "win.settings")
         menu.append("About Riff", "win.about")
         menu_btn = Gtk.MenuButton()
         menu_btn.set_icon_name("open-menu-symbolic")
@@ -219,6 +221,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _install_actions(self) -> None:
         actions = {
             "lyrics": self.show_lyrics,
+            "settings": self.show_settings,
+            "ai-mix": self.start_ai_mix,
             "about": self.show_about,
         }
         for name, cb in actions.items():
@@ -494,6 +498,51 @@ class MainWindow(Adw.ApplicationWindow):
             "closed",
             lambda *_: self.service.position_listeners.remove(on_position))
         dialog.present(self)
+
+    def show_settings(self) -> None:
+        from .settings import SettingsDialog
+
+        SettingsDialog(self).present(self)
+
+    def start_ai_mix(self) -> None:
+        from ..core import ai
+
+        key = str(config.settings.get("anthropic_api_key", "") or "")
+        if not key:
+            self.toast("Add your Anthropic API key in Settings to use AI Mix")
+            self.show_settings()
+            return
+
+        def work():
+            recent = self.library.recent(30)
+            favorites = self.library.favorites()[:30]
+            if not recent and not favorites:
+                raise RuntimeError(
+                    "Play or favorite some songs first — AI Mix learns from them")
+            suggestions = ai.suggest_songs(key, recent, favorites)
+            known = {t.video_id for t in recent}
+            tracks, seen = [], set()
+            for title, artist in suggestions:
+                try:
+                    results = self.api.search(f"{title} {artist}", "songs")
+                except Exception:  # noqa: BLE001 — skip unresolvable songs
+                    continue
+                for candidate in results.get("songs", [])[:1]:
+                    if candidate.video_id not in seen | known:
+                        seen.add(candidate.video_id)
+                        tracks.append(candidate)
+            if not tracks:
+                raise RuntimeError("Couldn't find the suggested songs on YouTube Music")
+            return tracks
+
+        def done(tracks) -> None:
+            self.service.play_tracks(tracks)
+            self.toast(f"AI Mix: queued {len(tracks)} songs")
+
+        self.toast("Creating your AI Mix — this takes a few seconds…")
+        run_async(work, done,
+                  lambda exc: self.toast(f"AI Mix failed: {exc}"),
+                  name="riff-ai-mix")
 
     def show_about(self) -> None:
         from .. import __version__

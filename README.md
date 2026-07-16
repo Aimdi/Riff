@@ -86,6 +86,31 @@ python -m riff
 | Lyrics (synced) | Header menu → *Lyrics*; click a line to seek |
 | Shortcuts | `Space` play/pause · `Ctrl+←/→` prev/next · `Shift+←/→` seek ±10s · `Ctrl+F` or `/` search · `Ctrl+Q` quit |
 
+### Settings
+
+Header menu → **Settings**: audio quality (high/medium/low — affects
+streaming and data usage), radio autoplay, account status, and the AI Mix
+API key. Stored in `~/.config/riff/settings.json`.
+
+### AI Mix (optional)
+
+With an [Anthropic API key](https://platform.claude.com/) saved in Settings,
+the header menu's **AI Mix** asks Claude (Opus 4.8) to curate ~20 songs from
+your listening history and favorites, finds them on YouTube Music, and queues
+them. Only song titles/artists are sent to the API; the key is stored locally
+and requests are billed to your own Anthropic account. Requires the
+`anthropic` Python package (`paru -S python-anthropic` or
+`pip install --user anthropic`).
+
+### Improving recommendations & audio quality
+
+- **Audio quality** defaults to *High*, which already picks the best audio
+  stream YouTube serves (typically ~256 kbps AAC / ~160 kbps Opus). Lower
+  settings save data.
+- **Recommendations** improve with: the optional account connection (below),
+  following artists (their releases appear on Home), your listening history
+  (radio seeds from it), and AI Mix (above).
+
 ### Connect your YouTube Music account (optional)
 
 Out of the box Riff is anonymous: generic charts on Home, no Google login.

@@ -29,6 +29,7 @@ DEFAULTS = {
     "audio_quality": "high",  # "high" | "medium" | "low"
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
+    "anthropic_api_key": "",
     "window_width": 1100,
     "window_height": 720,
 }

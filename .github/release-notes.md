@@ -1,6 +1,6 @@
-## Riff 0.2.5 🎵
+## Riff 0.3.0 🎵
 
-The left sidebar now lists your playlists like YouTube Music: a "＋ New playlist" button, your local Riff playlists, and — when your account is connected — your YouTube Music playlists including Liked Music. Click any to open it; the list updates as you create/rename/delete playlists. The sidebar scrolls when the list grows.
+Adds a Settings dialog (header menu → Settings): audio quality (high/medium/low, applied live), radio autoplay toggle, YouTube Music account status, and an optional Anthropic API key. With a key saved, the new **AI Mix** menu action has Claude (Opus 4.8) curate ~20 songs from your listening history and favorites, resolves them on YouTube Music, and queues them — only titles/artists are sent, the key stays local. Requires the python-anthropic package (optional).
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

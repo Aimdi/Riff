@@ -31,6 +31,7 @@ riff = "riff.app:main"
 
 [project.optional-dependencies]
 dev = ["pytest"]
+ai = ["anthropic>=0.40"]
 
 [tool.setuptools.packages.find]
 include = ["riff*"]
