@@ -72,9 +72,18 @@ class RiffApplication(Adw.Application):
 
         icons_dir = os.path.join(os.path.dirname(__file__), "ui", "icons")
         display = Gdk.Display.get_default()
-        if display is not None and os.path.isdir(icons_dir):
-            theme = Gtk.IconTheme.get_for_display(display)
-            theme.add_search_path(icons_dir)
+        if display is None:
+            return
+        if not os.path.isdir(icons_dir):
+            log.warning("bundled icons missing at %s — package is incomplete",
+                        icons_dir)
+            return
+        theme = Gtk.IconTheme.get_for_display(display)
+        theme.add_search_path(icons_dir)
+        if not theme.has_icon("emblem-favorite-symbolic"):
+            log.warning(
+                "icon fallback failed: emblem-favorite-symbolic still not "
+                "resolvable (icon theme: %s)", theme.get_theme_name())
 
     def _install_accels(self) -> None:
         def add(name: str, cb, *accels: str) -> None:
@@ -109,11 +118,17 @@ class RiffApplication(Adw.Application):
 
 
 def main() -> int:
+    from . import __version__
+
+    if "--version" in sys.argv:
+        print(f"riff {__version__}")
+        return 0
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(name)s %(levelname)s: %(message)s")
+    log.info("Riff %s starting", __version__)
     app = RiffApplication()
-    return app.run(sys.argv)
+    return app.run([a for a in sys.argv if a != "--version"])
 
 
 if __name__ == "__main__":
