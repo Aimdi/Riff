@@ -66,8 +66,8 @@ def test_playlists(lib):
 
 
 def test_playlist_folders(lib):
-    fid = lib.create_folder("Workouts", icon="emblem-favorite-symbolic")
-    assert lib.folders() == [(fid, "Workouts", "emblem-favorite-symbolic")]
+    fid = lib.create_folder("Workouts", color="#ef4444", emoji="🔥")
+    assert lib.folders() == [(fid, "Workouts", "#ef4444", "🔥")]
     a = lib.create_playlist("Cardio", folder_id=fid)
     b = lib.create_playlist("Loose")  # root
     assert lib.playlists(folder_id=fid) == [(a, "Cardio", 0)]
@@ -83,11 +83,12 @@ def test_playlist_folders(lib):
 
     tree = lib.playlist_tree()
     assert tree[0]["kind"] == "folder" and tree[0]["id"] == fid
-    assert tree[0]["icon"] == "emblem-favorite-symbolic"
+    assert tree[0]["color"] == "#ef4444"
+    assert tree[0]["emoji"] == "🔥"
     assert len(tree[0]["playlists"]) == 2
 
-    lib.set_folder_icon(fid, "media-optical-symbolic")
-    assert lib.folders()[0][2] == "media-optical-symbolic"
+    lib.set_folder_style(fid, color="#3b82f6", emoji="⭐")
+    assert lib.folders()[0][2:] == ("#3b82f6", "⭐")
     lib.rename_folder(fid, "Gym")
     assert lib.folders()[0][1] == "Gym"
     lib.delete_folder(fid)

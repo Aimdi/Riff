@@ -874,16 +874,20 @@ class PlaylistsPage(ContentPage):
     def _folder_block(self, item: dict, covers: dict) -> Gtk.Widget:
         from gi.repository import Gdk, GObject
 
+        from .folder_badge import FolderBadge
+
         block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        ficon = item.get("icon") or "folder-music-symbolic"
+        fcolor = item.get("color") or "#3b82f6"
+        femoji = item.get("emoji") or "🎵"
         icon_btn = Gtk.Button()
         icon_btn.add_css_class("flat")
-        icon_btn.set_tooltip_text("Change folder icon")
-        icon_btn.set_child(iconutil.image(ficon, size=22))
+        icon_btn.set_tooltip_text("Change color & emoji")
+        icon_btn.set_child(FolderBadge(fcolor, femoji, size=28))
         icon_btn.connect(
             "clicked",
-            lambda *_: self.window.choose_folder_icon(item["id"], ficon))
+            lambda *_: self.window.choose_folder_style(
+                item["id"], fcolor, femoji))
         header.append(icon_btn)
         title = Gtk.Label(label=item["name"])
         title.add_css_class("title-3")
@@ -981,11 +985,7 @@ class PlaylistsPage(ContentPage):
                           self.window.reload_sidebar_playlists()))
 
     def _create_folder(self) -> None:
-        self.window.prompt_text(
-            "New Folder", "Name",
-            lambda name: (self.window.library.create_folder(name),
-                          self.refresh(),
-                          self.window.reload_sidebar_playlists()))
+        self.window.create_folder_dialog()
 
     def _on_rename(self, _btn, pid: int) -> None:
         self.window.prompt_text(

@@ -31,7 +31,9 @@ CREATE TABLE IF NOT EXISTS playlist_folders (
     name TEXT NOT NULL,
     position INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
-    icon TEXT NOT NULL DEFAULT 'folder-music-symbolic'
+    icon TEXT NOT NULL DEFAULT 'folder-music-symbolic',
+    color TEXT NOT NULL DEFAULT '#3b82f6',
+    emoji TEXT NOT NULL DEFAULT '🎵'
 );
 CREATE TABLE IF NOT EXISTS playlists (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -104,7 +106,9 @@ class Library:
             "name TEXT NOT NULL,"
             "position INTEGER NOT NULL DEFAULT 0,"
             "created_at REAL NOT NULL,"
-            "icon TEXT NOT NULL DEFAULT 'folder-music-symbolic')"
+            "icon TEXT NOT NULL DEFAULT 'folder-music-symbolic',"
+            "color TEXT NOT NULL DEFAULT '#3b82f6',"
+            "emoji TEXT NOT NULL DEFAULT '🎵')"
         )
         fcols = {
             r[1]
@@ -115,6 +119,16 @@ class Library:
             self._db.execute(
                 "ALTER TABLE playlist_folders ADD COLUMN icon TEXT "
                 "NOT NULL DEFAULT 'folder-music-symbolic'"
+            )
+        if fcols and "color" not in fcols:
+            self._db.execute(
+                "ALTER TABLE playlist_folders ADD COLUMN color TEXT "
+                "NOT NULL DEFAULT '#3b82f6'"
+            )
+        if fcols and "emoji" not in fcols:
+            self._db.execute(
+                "ALTER TABLE playlist_folders ADD COLUMN emoji TEXT "
+                "NOT NULL DEFAULT '🎵'"
             )
 
     # -- favorites ---------------------------------------------------------
@@ -188,37 +202,38 @@ class Library:
 
     # -- playlist folders (Spotify-style) --------------------------------------
 
-    # Icons we ship under riff/ui/icons/ — shown in the folder icon picker.
-    FOLDER_ICONS: tuple[tuple[str, str], ...] = (
-        ("folder-music-symbolic", "Music"),
-        ("folder-download-symbolic", "Downloads"),
-        ("emblem-favorite-symbolic", "Favorites"),
-        ("emblem-music-symbolic", "Note"),
-        ("media-optical-symbolic", "Album"),
-        ("view-list-symbolic", "List"),
-        ("view-list-ordered-symbolic", "Queue"),
-        ("audio-x-generic-symbolic", "Audio"),
-        ("user-home-symbolic", "Home"),
-        ("web-browser-symbolic", "Discover"),
-        ("document-open-recent-symbolic", "Recent"),
-        ("riff-stats-symbolic", "Stats"),
-        ("system-search-symbolic", "Search"),
-        ("media-playlist-shuffle-symbolic", "Shuffle"),
-    )
-    DEFAULT_FOLDER_ICON = "folder-music-symbolic"
+    DEFAULT_FOLDER_COLOR = "#3b82f6"
+    DEFAULT_FOLDER_EMOJI = "🎵"
 
-    def create_folder(self, name: str, icon: str | None = None) -> int:
-        icon = icon or self.DEFAULT_FOLDER_ICON
-        if icon not in {i for i, _ in self.FOLDER_ICONS}:
-            icon = self.DEFAULT_FOLDER_ICON
+    @staticmethod
+    def _norm_color(color: str | None) -> str:
+        import re
+        c = (color or Library.DEFAULT_FOLDER_COLOR).strip()
+        if not c.startswith("#"):
+            c = "#" + c
+        if not re.match(r"^#[0-9A-Fa-f]{6}$", c):
+            return Library.DEFAULT_FOLDER_COLOR
+        return c.lower()
+
+    @staticmethod
+    def _norm_emoji(emoji: str | None) -> str:
+        e = (emoji or "").strip()
+        return e[:8] if e else Library.DEFAULT_FOLDER_EMOJI
+
+    def create_folder(self, name: str, color: str | None = None,
+                      emoji: str | None = None, **_legacy) -> int:
+        color = self._norm_color(color or self.DEFAULT_FOLDER_COLOR)
+        emoji = self._norm_emoji(emoji or self.DEFAULT_FOLDER_EMOJI)
         with self._lock, self._db:
             row = self._db.execute(
                 "SELECT COALESCE(MAX(position), -1) FROM playlist_folders"
             ).fetchone()
             cur = self._db.execute(
-                "INSERT INTO playlist_folders (name, position, created_at, icon) "
-                "VALUES (?,?,?,?)",
-                (name, row[0] + 1, time.time(), icon),
+                "INSERT INTO playlist_folders "
+                "(name, position, created_at, icon, color, emoji) "
+                "VALUES (?,?,?,?,?,?)",
+                (name, row[0] + 1, time.time(), "folder-music-symbolic",
+                 color, emoji),
             )
             return cur.lastrowid
 
@@ -229,14 +244,27 @@ class Library:
                 (name, folder_id),
             )
 
-    def set_folder_icon(self, folder_id: int, icon: str) -> None:
-        if icon not in {i for i, _ in self.FOLDER_ICONS}:
-            icon = self.DEFAULT_FOLDER_ICON
+    def set_folder_style(self, folder_id: int, *, color: str | None = None,
+                         emoji: str | None = None) -> None:
         with self._lock, self._db:
-            self._db.execute(
-                "UPDATE playlist_folders SET icon = ? WHERE id = ?",
-                (icon, folder_id),
-            )
+            if color is not None:
+                self._db.execute(
+                    "UPDATE playlist_folders SET color = ? WHERE id = ?",
+                    (self._norm_color(color), folder_id),
+                )
+            if emoji is not None:
+                self._db.execute(
+                    "UPDATE playlist_folders SET emoji = ? WHERE id = ?",
+                    (self._norm_emoji(emoji), folder_id),
+                )
+
+    # Back-compat alias used by older UI call sites.
+    def set_folder_icon(self, folder_id: int, icon: str) -> None:
+        # Old symbolic names are ignored; treat non-hex as emoji if short.
+        if icon and icon.startswith("#"):
+            self.set_folder_style(folder_id, color=icon)
+        elif icon and not icon.endswith("-symbolic"):
+            self.set_folder_style(folder_id, emoji=icon)
 
     def delete_folder(self, folder_id: int) -> None:
         """Remove the folder; playlists inside move back to the root."""
@@ -249,14 +277,15 @@ class Library:
                 "DELETE FROM playlist_folders WHERE id = ?", (folder_id,)
             )
 
-    def folders(self) -> list[tuple[int, str, str]]:
-        """[(id, name, icon)] ordered for the sidebar."""
+    def folders(self) -> list[tuple[int, str, str, str]]:
+        """[(id, name, color, emoji)] ordered for the sidebar."""
         with self._lock:
             rows = self._db.execute(
-                "SELECT id, name, COALESCE(icon, 'folder-music-symbolic') "
+                "SELECT id, name, "
+                "COALESCE(color, '#3b82f6'), COALESCE(emoji, '🎵') "
                 "FROM playlist_folders ORDER BY position, created_at"
             ).fetchall()
-        return [(r[0], r[1], r[2]) for r in rows]
+        return [(r[0], r[1], r[2], r[3]) for r in rows]
 
     def set_playlist_folder(
         self, playlist_id: int, folder_id: int | None
@@ -361,12 +390,13 @@ class Library:
         """
         folders = self.folders()
         tree: list[dict] = []
-        for fid, fname, ficon in folders:
+        for fid, fname, fcolor, femoji in folders:
             tree.append({
                 "kind": "folder",
                 "id": fid,
                 "name": fname,
-                "icon": ficon,
+                "color": fcolor,
+                "emoji": femoji,
                 "playlists": self.playlists(folder_id=fid),
             })
         for pid, name, count in self.playlists(folder_id=None):
