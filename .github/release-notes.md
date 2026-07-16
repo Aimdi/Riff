@@ -1,3 +1,7 @@
+## Riff 0.10.2 🎵
+
+**Local AI model picker** — Settings → AI Mix → Local offers several curated GGUFs (Qwen 1.5B/3B/7B, Llama 3.2 3B, Gemma 2 2B). ★ marks Riff’s recommended pick (Qwen 2.5 3B).
+
 ## Riff 0.10.1 🎵
 
 **Clickable now-playing** — tap the song title or cover to open the album/single, tap the artist name to open the artist page (when YouTube Music provides those links).

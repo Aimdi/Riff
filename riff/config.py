@@ -30,6 +30,7 @@ DEFAULTS = {
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
+    "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",
     "openai_base_url": "https://api.openai.com/v1",
     "openai_api_key": "",

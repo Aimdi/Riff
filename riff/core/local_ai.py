@@ -1,16 +1,14 @@
-"""Local AI for AI Mix — one GGUF model, loaded in-process.
+"""Local AI for AI Mix — GGUF models loaded in-process (no Ollama server).
 
-No Ollama, no background server. Install downloads:
+Install downloads:
   1. a private Python venv with ``llama-cpp-python``
-  2. a small GGUF Riff chose for you
+  2. one of Riff's curated GGUF models (user picks; one is recommended)
 
-Inference loads the model into Riff's process (or a short-lived helper
-process using that venv) only while AI Mix runs.
+Inference loads the model into memory only while AI Mix needs it.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import shutil
@@ -26,37 +24,124 @@ from .models import Track
 
 log = logging.getLogger("riff.local_ai")
 
-# Riff's pick: small, instruct-tuned, solid JSON for its size.
-# Q4_K_M quant ≈ 1 GB on disk, ~1.5 GB RAM — fine on a laptop CPU.
-MODEL_FILENAME = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
-MODEL_LABEL = "Qwen 2.5 · 1.5B"
-MODEL_SIZE_HINT = "~1 GB"
-MODEL_WHY = (
-    "A small on-device model — no account, no server, nothing leaves your "
-    "PC. Riff picks this size so install and AI Mix stay practical."
-)
-# Official Qwen GGUF on Hugging Face (LFS redirect works with urllib).
-MODEL_URL = (
-    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/"
-    + MODEL_FILENAME
-)
-
 _MODELS_DIR = os.path.join(config.DATA_DIR, "models")
-_MODEL_PATH = os.path.join(_MODELS_DIR, MODEL_FILENAME)
 _VENV_DIR = os.path.join(config.DATA_DIR, "ai-venv")
 _VENV_PY = os.path.join(
     _VENV_DIR, "bin", "python" if os.name != "nt" else "python.exe")
 
-# Kept alive for the process after first AI Mix (cold load is the slow part).
+# Kept alive after first AI Mix; swapped when the user changes model.
 _llm = None
+_llm_model_id: str | None = None
+
+
+@dataclass(frozen=True)
+class LocalModel:
+    """One on-device model Riff is willing to install for you."""
+
+    id: str
+    label: str
+    size_hint: str
+    blurb: str
+    filename: str
+    url: str
+    min_bytes: int = 50_000_000
+    recommended: bool = False
+
+    @property
+    def path(self) -> str:
+        return os.path.join(_MODELS_DIR, self.filename)
+
+    @property
+    def combo_label(self) -> str:
+        mark = " ★" if self.recommended else ""
+        return f"{self.label} · {self.size_hint}{mark}"
+
+
+# Curated only — not a full HF browser. Order: fast → recommended → better.
+MODELS: tuple[LocalModel, ...] = (
+    LocalModel(
+        id="qwen2.5-1.5b",
+        label="Qwen 2.5 · 1.5B",
+        size_hint="~1 GB",
+        blurb="Fastest. Fine for light mixes on slower laptops.",
+        filename="qwen2.5-1.5b-instruct-q4_k_m.gguf",
+        url=(
+            "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/"
+            "resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf"
+        ),
+        min_bytes=800_000_000,
+    ),
+    LocalModel(
+        id="gemma2-2b",
+        label="Gemma 2 · 2B",
+        size_hint="~1.6 GB",
+        blurb="Google's small instruct model — compact and capable.",
+        filename="gemma-2-2b-it-Q4_K_M.gguf",
+        url=(
+            "https://huggingface.co/bartowski/gemma-2-2b-it-GGUF/"
+            "resolve/main/gemma-2-2b-it-Q4_K_M.gguf"
+        ),
+        min_bytes=1_200_000_000,
+    ),
+    LocalModel(
+        id="qwen2.5-3b",
+        label="Qwen 2.5 · 3B",
+        size_hint="~2 GB",
+        blurb="Best balance of quality and speed for AI Mix. Recommended.",
+        filename="qwen2.5-3b-instruct-q4_k_m.gguf",
+        url=(
+            "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/"
+            "resolve/main/qwen2.5-3b-instruct-q4_k_m.gguf"
+        ),
+        min_bytes=1_500_000_000,
+        recommended=True,
+    ),
+    LocalModel(
+        id="llama3.2-3b",
+        label="Llama 3.2 · 3B",
+        size_hint="~2 GB",
+        blurb="Meta's small instruct model — strong alternative to Qwen 3B.",
+        filename="Llama-3.2-3B-Instruct-Q4_K_M.gguf",
+        url=(
+            "https://huggingface.co/bartowski/Llama-3.2-3B-Instruct-GGUF/"
+            "resolve/main/Llama-3.2-3B-Instruct-Q4_K_M.gguf"
+        ),
+        min_bytes=1_500_000_000,
+    ),
+    LocalModel(
+        id="qwen2.5-7b",
+        label="Qwen 2.5 · 7B",
+        size_hint="~4.5 GB",
+        blurb="Noticeably smarter curation. Heavier download and slower on CPU.",
+        filename="Qwen2.5-7B-Instruct-Q4_K_M.gguf",
+        url=(
+            "https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF/"
+            "resolve/main/Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+        ),
+        min_bytes=3_500_000_000,
+    ),
+)
+
+_MODELS_BY_ID = {m.id: m for m in MODELS}
+DEFAULT_MODEL_ID = next(m.id for m in MODELS if m.recommended)
+
+# Back-compat aliases for code/tests that still reference old constants.
+MODEL_LABEL = _MODELS_BY_ID[DEFAULT_MODEL_ID].label
+MODEL_SIZE_HINT = _MODELS_BY_ID[DEFAULT_MODEL_ID].size_hint
+MODEL_WHY = (
+    "Pick a model below — Riff downloads it onto this PC and runs it "
+    "inside the app. Nothing leaves your machine. The ★ option is the "
+    "default Riff recommends."
+)
 
 
 @dataclass(frozen=True)
 class LocalAiStatus:
     """Snapshot for the Settings UI."""
 
-    runtime_ready: bool  # llama-cpp-python importable from the venv
-    model_ready: bool    # GGUF file present
+    runtime_ready: bool
+    model_ready: bool
+    model: LocalModel
     detail: str
 
     @property
@@ -64,13 +149,36 @@ class LocalAiStatus:
         return self.runtime_ready and self.model_ready
 
 
-def model_path() -> str:
-    return _MODEL_PATH
+def get_model(model_id: str | None = None) -> LocalModel:
+    """Resolve a catalog entry; unknown ids fall back to the recommended one."""
+    mid = model_id or str(
+        config.settings.get("local_ai_model", DEFAULT_MODEL_ID) or DEFAULT_MODEL_ID
+    )
+    return _MODELS_BY_ID.get(mid) or _MODELS_BY_ID[DEFAULT_MODEL_ID]
 
 
-def model_file_ready() -> bool:
+def selected_model() -> LocalModel:
+    return get_model()
+
+
+def set_selected_model(model_id: str) -> LocalModel:
+    """Persist selection and drop a loaded model if it no longer matches."""
+    model = get_model(model_id)
+    config.settings.set("local_ai_model", model.id)
+    global _llm, _llm_model_id
+    if _llm is not None and _llm_model_id != model.id:
+        unload()
+    return model
+
+
+def model_path(model: LocalModel | None = None) -> str:
+    return (model or selected_model()).path
+
+
+def model_file_ready(model: LocalModel | None = None) -> bool:
+    m = model or selected_model()
     try:
-        return os.path.isfile(_MODEL_PATH) and os.path.getsize(_MODEL_PATH) > 50_000_000
+        return os.path.isfile(m.path) and os.path.getsize(m.path) > m.min_bytes
     except OSError:
         return False
 
@@ -91,26 +199,33 @@ def runtime_ready() -> bool:
         return False
 
 
-def status() -> LocalAiStatus:
+def status(model: LocalModel | None = None) -> LocalAiStatus:
+    m = model or selected_model()
     has_runtime = runtime_ready()
-    has_model = model_file_ready()
+    has_model = model_file_ready(m)
     if has_runtime and has_model:
-        detail = f"Ready — {MODEL_LABEL} on this machine (no server)"
+        detail = f"Ready — {m.label} on this machine (no server)"
     elif not has_runtime and not has_model:
         detail = (
-            f"Not installed — one click downloads the engine + "
-            f"{MODEL_LABEL} ({MODEL_SIZE_HINT})"
+            f"Not installed — Install downloads the engine + "
+            f"{m.label} ({m.size_hint})"
         )
     elif not has_runtime:
         detail = "Model file present, but the local engine is not installed yet"
     else:
-        detail = f"{MODEL_LABEL} not downloaded yet ({MODEL_SIZE_HINT})"
+        detail = f"{m.label} not downloaded yet ({m.size_hint})"
     return LocalAiStatus(
-        runtime_ready=has_runtime, model_ready=has_model, detail=detail)
+        runtime_ready=has_runtime,
+        model_ready=has_model,
+        model=m,
+        detail=detail,
+    )
 
 
 def apply_local_settings() -> None:
     config.settings.set("ai_provider", "local")
+    # Ensure a valid model id is stored.
+    set_selected_model(selected_model().id)
 
 
 def _download(url: str, dest: str, progress=None, label: str = "Downloading") -> None:
@@ -168,7 +283,6 @@ def ensure_runtime(progress=None) -> None:
             timeout=120,
         )
 
-    # Prefer prebuilt CPU wheels when available; fall back to default index.
     pip = [_VENV_PY, "-m", "pip", "install", "--upgrade", "pip", "wheel"]
     report("Updating pip…")
     subprocess.run(pip, check=True, capture_output=True, timeout=300)
@@ -193,7 +307,10 @@ def ensure_runtime(progress=None) -> None:
             break
         except subprocess.CalledProcessError as exc:
             last_err = exc
-            log.warning("pip install failed: %s", exc.stderr[-500:] if exc.stderr else exc)
+            log.warning(
+                "pip install failed: %s",
+                (exc.stderr or b"")[-500:],
+            )
         except subprocess.TimeoutExpired as exc:
             last_err = exc
 
@@ -207,27 +324,32 @@ def ensure_runtime(progress=None) -> None:
     report("Local AI engine ready")
 
 
-def ensure_model(progress=None) -> None:
+def ensure_model(progress=None, model: LocalModel | None = None) -> None:
+    m = model or selected_model()
+
     def report(msg: str) -> None:
         log.info("%s", msg)
         if progress:
             progress(msg)
 
-    if model_file_ready():
+    if model_file_ready(m):
         return
     os.makedirs(_MODELS_DIR, exist_ok=True)
-    report(f"Downloading {MODEL_LABEL} ({MODEL_SIZE_HINT})…")
-    _download(MODEL_URL, _MODEL_PATH, progress=progress, label=f"Downloading {MODEL_LABEL}")
-    if not model_file_ready():
+    report(f"Downloading {m.label} ({m.size_hint})…")
+    _download(m.url, m.path, progress=progress, label=f"Downloading {m.label}")
+    if not model_file_ready(m):
         raise RuntimeError("Model download finished but the file looks incomplete")
-    report(f"{MODEL_LABEL} downloaded")
+    report(f"{m.label} downloaded")
 
 
-def install_local_ai(progress=None) -> LocalAiStatus:
-    """One-shot: engine + model file. No server."""
+def install_local_ai(progress=None, model_id: str | None = None) -> LocalAiStatus:
+    """One-shot: engine + selected (or given) model file. No server."""
+    if model_id:
+        set_selected_model(model_id)
+    m = selected_model()
     ensure_runtime(progress=progress)
-    ensure_model(progress=progress)
-    return status()
+    ensure_model(progress=progress, model=m)
+    return status(m)
 
 
 def _site_packages() -> str | None:
@@ -245,13 +367,18 @@ def _site_packages() -> str | None:
 
 
 def _load_llm(progress=None):
-    """Import llama_cpp from the riff venv and load the GGUF once."""
-    global _llm
-    if _llm is not None:
+    """Import llama_cpp from the riff venv and load the selected GGUF."""
+    global _llm, _llm_model_id
+    m = selected_model()
+    if _llm is not None and _llm_model_id == m.id:
         return _llm
+    if _llm is not None:
+        unload()
 
-    if not model_file_ready():
-        raise RuntimeError("Local model is not installed — use Settings → Install")
+    if not model_file_ready(m):
+        raise RuntimeError(
+            f"{m.label} is not installed — pick it in Settings and press Install"
+        )
     site = _site_packages()
     if not site:
         raise RuntimeError("Local AI engine is not installed — use Settings → Install")
@@ -266,36 +393,43 @@ def _load_llm(progress=None):
         ) from exc
 
     if progress:
-        progress("Loading model into memory…")
-    log.info("loading local model from %s", _MODEL_PATH)
+        progress(f"Loading {m.label} into memory…")
+    log.info("loading local model %s from %s", m.id, m.path)
     n_threads = max(1, (os.cpu_count() or 4) - 1)
+    # 7B needs a bit more context room for long mix prompts; 4k is enough.
     _llm = Llama(
-        model_path=_MODEL_PATH,
+        model_path=m.path,
         n_ctx=4096,
         n_threads=n_threads,
-        n_gpu_layers=0,  # pure CPU; GPU would need a CUDA build
+        n_gpu_layers=0,
         verbose=False,
     )
+    _llm_model_id = m.id
     return _llm
 
 
 def unload() -> None:
     """Drop the in-memory model (frees RAM). Next AI Mix reloads it."""
-    global _llm
+    global _llm, _llm_model_id
     _llm = None
+    _llm_model_id = None
 
 
 def suggest_songs(recent: list[Track], favorites: list[Track],
                   count: int = 20, **context) -> list[tuple[str, str]]:
     """Blocking in-process generation. Same return shape as cloud providers."""
     llm = _load_llm()
+    m = selected_model()
     system = (
         ai_mod._SYSTEM
         + ' Respond ONLY with a JSON object of the form '
           '{"songs": [{"title": "...", "artist": "..."}]} — no other text.'
     )
-    # Slightly fewer songs on-device keeps latency and quality better.
-    count = min(count, 16)
+    # Smaller models get fewer songs so JSON stays reliable.
+    if m.id.endswith("1.5b") or m.id.endswith("2b"):
+        count = min(count, 12)
+    else:
+        count = min(count, 16)
     user = ai_mod.build_prompt(recent, favorites, count, **context)
 
     try:
@@ -306,7 +440,6 @@ def suggest_songs(recent: list[Track], favorites: list[Track],
             ],
             temperature=0.7,
             max_tokens=2048,
-            # stop if the model starts babbling after JSON
         )
     except Exception as exc:  # noqa: BLE001
         log.exception("local generation failed")
@@ -325,10 +458,15 @@ def suggest_songs(recent: list[Track], favorites: list[Track],
         ) from exc
 
 
-def remove_install() -> None:
-    """Optional cleanup: delete model + venv (not wired in UI yet)."""
+def remove_install(model_id: str | None = None) -> None:
+    """Delete one model file, or the whole engine + all models."""
     unload()
-    if os.path.isfile(_MODEL_PATH):
-        os.remove(_MODEL_PATH)
+    if model_id:
+        m = get_model(model_id)
+        if os.path.isfile(m.path):
+            os.remove(m.path)
+        return
+    if os.path.isdir(_MODELS_DIR):
+        shutil.rmtree(_MODELS_DIR, ignore_errors=True)
     if os.path.isdir(_VENV_DIR):
         shutil.rmtree(_VENV_DIR, ignore_errors=True)

@@ -148,13 +148,31 @@ class SettingsDialog(Adw.PreferencesDialog):
         # -- Local model (Riff-managed) ----------------------------------------
         self.local_group = Adw.PreferencesGroup()
         self.local_group.set_title("Local model")
-        self.local_group.set_description(
-            f"Riff downloads {local_ai.MODEL_LABEL} onto this PC and runs it "
-            f"inside the app — no Ollama, no background server. "
-            f"{local_ai.MODEL_WHY}")
+        self.local_group.set_description(local_ai.MODEL_WHY)
+
+        self._local_models = list(local_ai.MODELS)
+        self.local_model_row = Adw.ComboRow()
+        self.local_model_row.set_title("Model")
+        self.local_model_row.set_subtitle(
+            "★ = Riff’s recommended pick. Bigger ≈ smarter and slower.")
+        self.local_model_row.set_model(Gtk.StringList.new(
+            [m.combo_label for m in self._local_models]))
+        current_mid = str(
+            config.settings.get("local_ai_model", local_ai.DEFAULT_MODEL_ID)
+            or local_ai.DEFAULT_MODEL_ID)
+        try:
+            self.local_model_row.set_selected(
+                next(i for i, m in enumerate(self._local_models)
+                     if m.id == current_mid))
+        except StopIteration:
+            self.local_model_row.set_selected(
+                next(i for i, m in enumerate(self._local_models)
+                     if m.recommended))
+        self.local_model_row.connect("notify::selected", self._on_local_model)
+        self.local_group.add(self.local_model_row)
 
         self.local_status_row = Adw.ActionRow()
-        self.local_status_row.set_title(local_ai.MODEL_LABEL)
+        self.local_status_row.set_title("Status")
         self.local_status_row.set_subtitle("Checking…")
         self.local_install_btn = Gtk.Button(label="Install")
         self.local_install_btn.add_css_class("pill")
@@ -240,15 +258,30 @@ class SettingsDialog(Adw.PreferencesDialog):
         self.anthropic_group.set_visible(provider == "anthropic")
         self.openai_group.set_visible(provider == "openai")
 
+    def _selected_local_model(self) -> local_ai.LocalModel:
+        idx = int(self.local_model_row.get_selected())
+        if 0 <= idx < len(self._local_models):
+            return self._local_models[idx]
+        return local_ai.selected_model()
+
+    def _on_local_model(self, row: Adw.ComboRow, _pspec) -> None:
+        model = self._local_models[row.get_selected()]
+        local_ai.set_selected_model(model.id)
+        self.local_model_row.set_subtitle(model.blurb)
+        self._refresh_local_status()
+
     def _refresh_local_status(self) -> None:
-        """Query Ollama on a worker thread and update the row."""
+        """Check engine + selected GGUF on a worker thread."""
         if self._installing:
             return
+        model = self._selected_local_model()
+        self.local_model_row.set_subtitle(model.blurb)
 
         def work():
-            return local_ai.status()
+            return local_ai.status(model)
 
         def done(st: local_ai.LocalAiStatus) -> None:
+            self.local_status_row.set_title(st.model.label)
             self.local_status_row.set_subtitle(st.detail)
             if st.ready:
                 self.local_install_btn.set_label("Ready")
@@ -256,11 +289,11 @@ class SettingsDialog(Adw.PreferencesDialog):
                 self.local_install_btn.remove_css_class("suggested-action")
             else:
                 if st.runtime_ready and not st.model_ready:
-                    label = f"Download model ({local_ai.MODEL_SIZE_HINT})"
+                    label = f"Download ({st.model.size_hint})"
                 elif st.model_ready and not st.runtime_ready:
                     label = "Install engine"
                 else:
-                    label = f"Install ({local_ai.MODEL_SIZE_HINT})"
+                    label = f"Install ({st.model.size_hint})"
                 self.local_install_btn.set_label(label)
                 self.local_install_btn.set_sensitive(True)
                 self.local_install_btn.add_css_class("suggested-action")
@@ -300,13 +333,15 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _on_install_local(self, _btn) -> None:
         if self._installing:
             return
+        model = self._selected_local_model()
+        local_ai.set_selected_model(model.id)
         self._installing = True
         self.local_install_btn.set_sensitive(False)
         self.local_install_btn.set_label("Working…")
-        self.local_status_row.set_subtitle("Starting install…")
+        self.local_status_row.set_subtitle(f"Installing {model.label}…")
 
         dialog = Adw.Dialog.new()
-        dialog.set_title("Install local AI")
+        dialog.set_title(f"Install {model.label}")
         dialog.set_content_width(400)
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
         box.append(Adw.HeaderBar())
@@ -329,19 +364,19 @@ class SettingsDialog(Adw.PreferencesDialog):
             GLib.idle_add(lambda: (status.set_label(msg), False)[1])
 
         def work():
-            return local_ai.install_local_ai(progress=progress)
+            return local_ai.install_local_ai(
+                progress=progress, model_id=model.id)
 
         def done(st: local_ai.LocalAiStatus) -> None:
             self._installing = False
             local_ai.apply_local_settings()
             config.settings.set("ai_provider", "local")
-            # keep combo on Local
             self._provider_row.set_selected(self._provider_index("local"))
             spinner.stop()
             dialog.close()
             self._refresh_local_status()
             self.window.toast(
-                f"{local_ai.MODEL_LABEL} ready — AI Mix runs fully on-device")
+                f"{st.model.label} ready — AI Mix runs fully on-device")
 
         def fail(exc: Exception) -> None:
             self._installing = False
