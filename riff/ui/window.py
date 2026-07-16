@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import logging
+
 from gi.repository import Adw, Gio, GLib, Gtk
+
+log = logging.getLogger("riff.window")
 
 from .. import APP_NAME, config
 from ..core.models import Track
@@ -14,11 +18,13 @@ from .pages import (
     ExplorePage,
     HomePage,
     LibraryPage,
+    LocalFilesPage,
     LocalPlaylistPage,
     MoodPage,
     PlaylistPage,
     PlaylistsPage,
     SearchPage,
+    StatsPage,
 )
 from .player_bar import PlayerBar
 from .queue_panel import QueuePanel
@@ -64,8 +70,11 @@ SIDEBAR_ITEMS = [
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
+    ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
+    ("local", "Local Files", "folder-music-symbolic"),
     ("downloads", "Downloads", "folder-download-symbolic"),
+    ("dislikes", "Disliked", "action-unavailable-symbolic"),
 ]
 
 
@@ -91,8 +100,11 @@ class MainWindow(Adw.ApplicationWindow):
             "search": SearchPage(self),
             "favorites": LibraryPage(self, "favorites"),
             "history": LibraryPage(self, "history"),
+            "stats": StatsPage(self),
             "playlists": PlaylistsPage(self),
+            "local": LocalFilesPage(self),
             "downloads": LibraryPage(self, "downloads"),
+            "dislikes": LibraryPage(self, "dislikes"),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
@@ -112,6 +124,7 @@ class MainWindow(Adw.ApplicationWindow):
         menu = Gio.Menu()
         menu.append("AI Mix", "win.ai-mix")
         menu.append("Lyrics", "win.lyrics")
+        menu.append("Mini Player", "win.mini")
         menu.append("Settings", "win.settings")
         menu.append("About Riff", "win.about")
         menu_btn = Gtk.MenuButton()
@@ -225,6 +238,7 @@ class MainWindow(Adw.ApplicationWindow):
             "lyrics": self.show_lyrics,
             "settings": self.show_settings,
             "ai-mix": self.start_ai_mix,
+            "mini": self.open_mini_player,
             "about": self.show_about,
         }
         for name, cb in actions.items():
@@ -501,53 +515,94 @@ class MainWindow(Adw.ApplicationWindow):
             lambda *_: self.service.position_listeners.remove(on_position))
         dialog.present(self)
 
+    def open_mini_player(self) -> None:
+        from .mini import MiniPlayer
+
+        mini = MiniPlayer(self)
+        self.set_visible(False)
+        mini.present()
+
     def show_settings(self) -> None:
         from .settings import SettingsDialog
 
         SettingsDialog(self).present(self)
 
-    def start_ai_mix(self) -> None:
-        from ..core import ai
-
+    def _ai_provider_config(self, interactive: bool) -> dict | None:
         provider = str(config.settings.get("ai_provider", "anthropic"))
         if provider == "openai":
-            base_url = str(config.settings.get("openai_base_url", "") or "")
-            openai_key = str(config.settings.get("openai_api_key", "") or "")
             model = str(config.settings.get("openai_model", "") or "")
             if not model:
-                self.toast("Set the model name in Settings to use AI Mix")
-                self.show_settings()
-                return
-        else:
-            key = str(config.settings.get("anthropic_api_key", "") or "")
-            if not key:
+                if interactive:
+                    self.toast("Set the model name in Settings to use AI Mix")
+                    self.show_settings()
+                return None
+            return {
+                "provider": "openai",
+                "base_url": str(config.settings.get("openai_base_url", "") or ""),
+                "key": str(config.settings.get("openai_api_key", "") or ""),
+                "model": model,
+            }
+        key = str(config.settings.get("anthropic_api_key", "") or "")
+        if not key:
+            if interactive:
                 self.toast("Add your Anthropic API key in Settings to use AI Mix")
                 self.show_settings()
-                return
+            return None
+        return {"provider": "anthropic", "key": key}
 
-        # Progress window: a long AI call must never look like "nothing
-        # happened" — status stays visible and errors persist until closed.
-        dialog = Adw.Dialog.new()
-        dialog.set_title("AI Mix")
-        dialog.set_content_width(380)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
-        box.append(Adw.HeaderBar())
-        spinner = Gtk.Spinner()
-        spinner.set_size_request(32, 32)
-        spinner.set_halign(Gtk.Align.CENTER)
-        spinner.start()
-        box.append(spinner)
-        status_label = Gtk.Label(label="Reading your listening history…")
-        status_label.set_wrap(True)
-        status_label.set_margin_start(20)
-        status_label.set_margin_end(20)
-        status_label.set_margin_bottom(24)
-        box.append(status_label)
-        dialog.set_child(box)
-        dialog.present(self)
+    def start_ai_mix(self) -> None:
+        self.refresh_ai_mix(interactive=True)
+
+    def maybe_auto_refresh_ai_mix(self) -> None:
+        """Daily background refresh, if enabled and configured."""
+        import datetime
+
+        if not config.settings.get("ai_mix_auto_refresh", False):
+            return
+        today = datetime.date.today().isoformat()
+        if config.settings.get("ai_mix_last_refresh", "") == today:
+            return
+        if self._ai_provider_config(interactive=False) is None:
+            return
+        if not self.library.recent(1) and not self.library.favorites():
+            return
+        log.info("auto-refreshing AI Mix")
+        self.refresh_ai_mix(interactive=False)
+
+    def refresh_ai_mix(self, interactive: bool = True) -> None:
+        from ..core import ai
+
+        cfg = self._ai_provider_config(interactive)
+        if cfg is None:
+            return
+
+        dialog = spinner = status_label = None
+        if interactive:
+            # Progress window: a long AI call must never look like "nothing
+            # happened" — status stays visible and errors persist until closed.
+            dialog = Adw.Dialog.new()
+            dialog.set_title("AI Mix")
+            dialog.set_content_width(380)
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+            box.append(Adw.HeaderBar())
+            spinner = Gtk.Spinner()
+            spinner.set_size_request(32, 32)
+            spinner.set_halign(Gtk.Align.CENTER)
+            spinner.start()
+            box.append(spinner)
+            status_label = Gtk.Label(label="Reading your listening history…")
+            status_label.set_wrap(True)
+            status_label.set_margin_start(20)
+            status_label.set_margin_end(20)
+            status_label.set_margin_bottom(24)
+            box.append(status_label)
+            dialog.set_child(box)
+            dialog.present(self)
 
         def set_status(text: str) -> None:
-            GLib.idle_add(lambda: (status_label.set_label(text), False)[1])
+            if status_label is not None:
+                GLib.idle_add(
+                    lambda: (status_label.set_label(text), False)[1])
 
         def work():
             recent = self.library.recent(40)
@@ -560,21 +615,24 @@ class MainWindow(Adw.ApplicationWindow):
             prev_id = self.library.find_playlist(AI_MIX_PLAYLIST)
             previous_mix = (
                 self.library.playlist_tracks(prev_id) if prev_id else [])
+            dislikes = self.library.dislikes()
             context = {
                 "most_played": most_played,
                 "following": following,
-                "avoid": previous_mix,
+                "avoid": previous_mix + dislikes,
             }
             set_status("Analyzing your taste and curating songs…\n"
                        "(this can take up to a minute)")
-            if provider == "openai":
+            if cfg["provider"] == "openai":
                 suggestions = ai.suggest_songs_openai(
-                    base_url, openai_key, model, recent, favorites, **context)
+                    cfg["base_url"], cfg["key"], cfg["model"],
+                    recent, favorites, **context)
             else:
                 suggestions = ai.suggest_songs(
-                    key, recent, favorites, **context)
+                    cfg["key"], recent, favorites, **context)
             known = ({t.video_id for t in recent}
-                     | {t.video_id for t in previous_mix})
+                     | {t.video_id for t in previous_mix}
+                     | {t.video_id for t in dislikes})
             tracks, seen = [], set()
             for i, (title, artist) in enumerate(suggestions, 1):
                 set_status(
@@ -592,18 +650,26 @@ class MainWindow(Adw.ApplicationWindow):
             return tracks
 
         def done(tracks) -> None:
+            import datetime
+
             pid = self.library.find_playlist(AI_MIX_PLAYLIST)
             if pid is None:
                 pid = self.library.create_playlist(AI_MIX_PLAYLIST)
             self.library.replace_playlist_tracks(pid, tracks)
+            config.settings.set(
+                "ai_mix_last_refresh", datetime.date.today().isoformat())
             self.reload_sidebar_playlists()
-            self.service.play_tracks(tracks)
-            dialog.close()
+            if interactive:
+                self.service.play_tracks(tracks)
+                dialog.close()
             self.toast(
                 f"AI Mix refreshed: {len(tracks)} songs — saved to "
                 f"“{AI_MIX_PLAYLIST}” in the sidebar")
 
         def fail(exc: Exception) -> None:
+            if not interactive:
+                log.warning("background AI Mix refresh failed: %s", exc)
+                return
             spinner.stop()
             spinner.set_visible(False)
             status_label.set_label(f"AI Mix failed:\n{exc}")

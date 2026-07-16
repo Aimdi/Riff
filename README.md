@@ -25,6 +25,13 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
   track changes
 - 🖥️ **MPRIS integration** — media keys, GNOME/KDE media widgets and
   `playerctl` all work
+- 🤖 **AI Mix** (optional) — a Discover-Weekly-style playlist curated by an
+  AI model of your choice, refreshable on demand or daily
+- 📊 **Stats page** — plays, hours, top songs/artists, daily activity
+- 🚷 **“Never Play This”** — banned songs stay out of radio and AI Mix
+- 📻 **ListenBrainz scrobbling** (optional)
+- 🗂️ **Local files** — index a folder of MP3/FLAC/OGG and play alongside streams
+- 🪟 **Mini player** — compact art + controls window
 - 🚫 No ads, no tracking, no Google account required
 
 ## Install on CachyOS / Arch

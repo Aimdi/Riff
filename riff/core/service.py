@@ -10,6 +10,7 @@ import logging
 
 from .. import config
 from ..util import run_async
+from . import scrobble
 from .api import MusicApi
 from .library import Library
 from .models import Track
@@ -52,6 +53,7 @@ class PlaybackService:
 
         self._play_token = 0  # invalidates in-flight resolutions
         self._radio_pending = False
+        self._scrobbled_current = False
 
         self.queue.on_changed = self._emit_queue_changed
         engine.on_state = self._on_engine_state
@@ -77,6 +79,7 @@ class PlaybackService:
         playable = [t for t in tracks if t.video_id or t.local_path]
         if not playable:
             return
+        self._maybe_scrobble()
         self.queue.set_tracks(playable, start=start)
         self._start_current()
 
@@ -87,10 +90,26 @@ class PlaybackService:
             self._extend_with_radio(track)
 
     def play_from_queue(self, order_index: int) -> None:
+        self._maybe_scrobble()
         if self.queue.jump_to(order_index):
             self._start_current()
 
+    def _maybe_scrobble(self) -> None:
+        """Submit the current track to ListenBrainz if it played enough."""
+        if self._scrobbled_current:
+            return
+        token = str(config.settings.get("listenbrainz_token", "") or "")
+        track = self.queue.current
+        if not token or track is None:
+            return
+        duration = float(track.duration or self.engine.duration or 0)
+        if scrobble.should_scrobble(self.engine.position, duration):
+            self._scrobbled_current = True
+            run_async(lambda: scrobble.submit(token, track),
+                      name="riff-scrobble")
+
     def next(self) -> None:
+        self._maybe_scrobble()
         if self.queue.next(manual=True):
             self._start_current()
         else:
@@ -102,6 +121,7 @@ class PlaybackService:
         if self.engine.position > 5:
             self.engine.seek(0)
             return
+        self._maybe_scrobble()
         if self.queue.previous():
             self._start_current()
 
@@ -139,6 +159,7 @@ class PlaybackService:
         if track is None:
             return
         self._play_token += 1
+        self._scrobbled_current = False
         token = self._play_token
         self._emit(self.track_listeners, track)
 
@@ -198,6 +219,7 @@ class PlaybackService:
 
         def done(tracks: list[Track]) -> None:
             self._radio_pending = False
+            tracks = self._without_dislikes(tracks)
             # Only extend if the seed is still what's playing.
             cur = self.queue.current
             if cur and cur.video_id == seed.video_id and tracks:
@@ -215,6 +237,7 @@ class PlaybackService:
         run_async(fetch, done, error, name="riff-radio")
 
     def _on_track_ended(self) -> None:
+        self._maybe_scrobble()
         nxt = self.queue.next(manual=False)
         if nxt is not None:
             self._start_current()
@@ -232,7 +255,8 @@ class PlaybackService:
 
         def done(tracks: list[Track]) -> None:
             known = {t.video_id for t in self.queue.tracks}
-            fresh = [t for t in tracks if t.video_id not in known]
+            fresh = [t for t in self._without_dislikes(tracks)
+                     if t.video_id not in known]
             if not fresh:
                 self._emit(self.state_listeners, STATE_STOPPED)
                 return
@@ -247,6 +271,13 @@ class PlaybackService:
             self._emit(self.state_listeners, STATE_STOPPED)
 
         run_async(fetch, done, error, name="riff-radio-continue")
+
+    def _without_dislikes(self, tracks: list[Track]) -> list[Track]:
+        try:
+            banned = self.library.disliked_ids()
+        except Exception:  # noqa: BLE001
+            return tracks
+        return [t for t in tracks if t.video_id not in banned]
 
     def _on_engine_state(self, state: str) -> None:
         self._emit(self.state_listeners, state)

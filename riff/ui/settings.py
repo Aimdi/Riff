@@ -43,7 +43,31 @@ class SettingsDialog(Adw.PreferencesDialog):
         radio.set_active(bool(config.settings.get("autoplay_radio", True)))
         radio.connect("notify::active", self._on_radio)
         playback.add(radio)
+
+        folder = Adw.EntryRow()
+        folder.set_title("Local music folder")
+        folder.set_text(str(config.settings.get("local_music_dir", "~/Music")))
+        folder.set_show_apply_button(True)
+        folder.connect("apply", lambda row: self._save(
+            "local_music_dir", row.get_text()))
+        playback.add(folder)
         page.add(playback)
+
+        # -- scrobbling ---------------------------------------------------------
+        scrobble = Adw.PreferencesGroup()
+        scrobble.set_title("Scrobbling")
+        scrobble.set_description(
+            "Optional: report your listens to ListenBrainz (free, open "
+            "source). Get a token at listenbrainz.org/settings — songs count "
+            "after half their length or 4 minutes.")
+        lb_row = Adw.PasswordEntryRow()
+        lb_row.set_title("ListenBrainz token")
+        lb_row.set_text(str(config.settings.get("listenbrainz_token", "") or ""))
+        lb_row.set_show_apply_button(True)
+        lb_row.connect("apply", lambda row: self._save(
+            "listenbrainz_token", row.get_text()))
+        scrobble.add(lb_row)
+        page.add(scrobble)
 
         # -- account -----------------------------------------------------------
         account = Adw.PreferencesGroup()
@@ -78,6 +102,16 @@ class SettingsDialog(Adw.PreferencesDialog):
             1 if config.settings.get("ai_provider") == "openai" else 0)
         provider.connect("notify::selected", self._on_provider)
         ai.add(provider)
+
+        auto = Adw.SwitchRow()
+        auto.set_title("Refresh AI Mix daily")
+        auto.set_subtitle(
+            "Rebuild the “✨ AI Mix” playlist automatically once a day "
+            "when Riff starts")
+        auto.set_active(bool(config.settings.get("ai_mix_auto_refresh", False)))
+        auto.connect("notify::active", lambda row, _p: config.settings.set(
+            "ai_mix_auto_refresh", bool(row.get_active())))
+        ai.add(auto)
 
         self.key_row = Adw.PasswordEntryRow()
         self.key_row.set_title("Anthropic API key")

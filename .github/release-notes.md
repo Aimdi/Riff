@@ -1,6 +1,6 @@
-## Riff 0.4.1 🎵
+## Riff 0.5.0 🎵
 
-AI Mix now shows a progress window (taste analysis → per-song resolution progress) instead of a transient toast, and failures stay visible in the window until you close it — no more silent "nothing happened". Also fixes a real failure cause: the Claude request had too small a token budget (thinking could truncate the JSON; now 16k), truncated responses are detected explicitly, and older python-anthropic versions without newer API parameters fall back to a plain JSON prompt automatically.
+Six new features: **ListenBrainz scrobbling** (Settings → token; standard half-or-4-minutes rule), **"Never Play This"** in every song menu (banned songs are filtered from radio and AI Mix; manage them in the new Disliked sidebar page), **daily AI Mix auto-refresh** (Settings toggle; refreshes in the background on first launch each day), a **Mini Player** window (header menu), **Local Files** (index a folder from Settings; "Artist - Title.ext" naming gets artist tags), and a **Stats page** (plays, hours, top songs/artists, 14-day activity).
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

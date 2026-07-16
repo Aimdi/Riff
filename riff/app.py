@@ -58,6 +58,10 @@ class RiffApplication(Adw.Application):
             log.exception("MPRIS unavailable")
         self._install_accels()
         self.window.present()
+        # Daily AI Mix auto-refresh, shortly after startup so it never
+        # competes with the first page load.
+        GLib.timeout_add_seconds(
+            15, lambda: (self.window.maybe_auto_refresh_ai_mix(), False)[1])
 
     def _register_bundled_icons(self) -> None:
         """Riff bundles the symbolic icons it uses.

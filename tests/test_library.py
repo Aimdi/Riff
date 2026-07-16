@@ -77,6 +77,29 @@ def test_follows(lib):
     assert len(lib.followed_artists()) == 1
 
 
+def test_dislikes(lib):
+    t = track(9)
+    assert not lib.is_disliked("v9")
+    lib.add_dislike(t)
+    assert lib.is_disliked("v9")
+    assert lib.disliked_ids() == {"v9"}
+    assert [d.video_id for d in lib.dislikes()] == ["v9"]
+    lib.remove_dislike("v9")
+    assert not lib.is_disliked("v9")
+
+
+def test_stats(lib):
+    for i in (1, 1, 1, 2):
+        lib.record_play(track(i))
+    o = lib.stats_overview()
+    assert o["plays"] == 4 and o["songs"] == 2
+    top = lib.top_artists()
+    assert top[0] == ("Artist 1", 3)
+    days = lib.plays_by_day(3)
+    assert len(days) == 3
+    assert days[-1][1] == 4  # all plays happened "today"
+
+
 def test_find_and_replace_playlist(lib):
     assert lib.find_playlist("✨ AI Mix") is None
     pid = lib.create_playlist("✨ AI Mix")

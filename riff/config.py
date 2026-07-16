@@ -34,6 +34,10 @@ DEFAULTS = {
     "openai_base_url": "https://api.openai.com/v1",
     "openai_api_key": "",
     "openai_model": "",
+    "ai_mix_auto_refresh": False,
+    "ai_mix_last_refresh": "",
+    "listenbrainz_token": "",
+    "local_music_dir": "~/Music",
     "window_width": 1100,
     "window_height": 720,
 }

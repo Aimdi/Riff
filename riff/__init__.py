@@ -1,6 +1,6 @@
 """Riff — a native YouTube Music player for Linux."""
 
-__version__ = "0.4.1"
+__version__ = "0.5.0"
 
 APP_ID = "io.github.aimdi.Riff"
 APP_NAME = "Riff"

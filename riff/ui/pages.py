@@ -500,6 +500,7 @@ class LibraryPage(ContentPage):
             "favorites": lib.favorites,
             "history": lib.recent,
             "downloads": lib.downloads,
+            "dislikes": lib.dislikes,
         }[self.kind]
         self.load_async(fetch, self._present)
 
@@ -512,12 +513,147 @@ class LibraryPage(ContentPage):
                             "Songs you play appear here."),
                 "downloads": ("folder-download-symbolic", "No downloads yet",
                               "Use a song's menu to download it for offline listening."),
+                "dislikes": ("action-unavailable-symbolic", "Nothing blocked",
+                             "Use a song's menu → “Never Play This” to keep it "
+                             "out of radio and AI Mix."),
             }[self.kind]
             self.show_widget(status_page(icon, title, desc))
             return
         tl = TrackList(self.window)
         tl.set_tracks(tracks)
         self.show_widget(scroll_wrap(_padded(tl)))
+
+
+class StatsPage(ContentPage):
+    """Listening statistics from the local history database."""
+
+    def refresh(self) -> None:
+        lib = self.window.library
+
+        def work():
+            return (lib.stats_overview(), lib.most_played(10),
+                    lib.top_artists(10), lib.plays_by_day(14))
+
+        self.load_async(work, self._present)
+
+    def _present(self, data) -> None:
+        overview, top_songs, top_artists, days = data
+        if not overview["plays"]:
+            self.show_widget(status_page(
+                "riff-stats-symbolic", "No stats yet",
+                "Play some music and your listening trends appear here."))
+            return
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+
+        # overview numbers
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        row.set_homogeneous(True)
+        hours = overview["seconds"] / 3600
+        for value, label in (
+                (f"{overview['plays']}", "plays"),
+                (f"{overview['songs']}", "different songs"),
+                (f"{hours:.1f} h", "listened")):
+            card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            card.add_css_class("card")
+            card.set_margin_top(2)
+            v = Gtk.Label(label=value)
+            v.add_css_class("title-1")
+            v.set_margin_top(14)
+            n = Gtk.Label(label=label)
+            n.add_css_class("dim-label")
+            n.set_margin_bottom(14)
+            card.append(v)
+            card.append(n)
+            row.append(card)
+        box.append(row)
+
+        # last 14 days
+        title = Gtk.Label(label="Last 14 days")
+        title.add_css_class("title-3")
+        title.set_xalign(0.0)
+        box.append(title)
+        maximum = max((c for _d, c in days), default=0) or 1
+        day_list = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for day, count in days:
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            d = Gtk.Label(label=day[5:])  # MM-DD
+            d.add_css_class("numeric")
+            d.add_css_class("dim-label")
+            line.append(d)
+            bar = Gtk.LevelBar.new_for_interval(0, maximum)
+            bar.set_value(count)
+            bar.set_hexpand(True)
+            bar.set_valign(Gtk.Align.CENTER)
+            line.append(bar)
+            c = Gtk.Label(label=str(count))
+            c.add_css_class("numeric")
+            c.set_width_chars(4)
+            line.append(c)
+            day_list.append(line)
+        box.append(day_list)
+
+        # top songs
+        if top_songs:
+            t = Gtk.Label(label="Top songs")
+            t.add_css_class("title-3")
+            t.set_xalign(0.0)
+            box.append(t)
+            tl = TrackList(self.window, numbered=True, radio_on_single=True)
+            tl.set_tracks([track for track, _plays in top_songs])
+            box.append(tl)
+
+        # top artists
+        if top_artists:
+            t = Gtk.Label(label="Top artists")
+            t.add_css_class("title-3")
+            t.set_xalign(0.0)
+            box.append(t)
+            lb = Gtk.ListBox()
+            lb.add_css_class("boxed-list")
+            lb.set_selection_mode(Gtk.SelectionMode.NONE)
+            for i, (name, plays) in enumerate(top_artists, 1):
+                row_a = Adw.ActionRow()
+                row_a.set_title(f"{i}.  {name}")
+                row_a.set_subtitle(f"{plays} plays")
+                lb.append(row_a)
+            box.append(lb)
+
+        self.show_widget(scroll_wrap(_padded(box)))
+
+
+class LocalFilesPage(ContentPage):
+    """Music files from a local folder (Settings → local music folder)."""
+
+    def refresh(self) -> None:
+        from .. import config
+        from ..core import localfiles
+
+        folder = str(config.settings.get("local_music_dir", "~/Music"))
+        self.load_async(lambda: (folder, localfiles.scan(folder)),
+                        self._present)
+
+    def _present(self, data) -> None:
+        folder, tracks = data
+        if not tracks:
+            self.show_widget(status_page(
+                "folder-music-symbolic", "No local music found",
+                f"No audio files in {folder}. Change the folder in Settings — "
+                "files named “Artist - Title.mp3” get proper artist tags."))
+            return
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        play = Gtk.Button()
+        play.set_child(_button_content("media-playback-start-symbolic",
+                                       f"Play All ({len(tracks)})"))
+        play.add_css_class("pill")
+        play.add_css_class("suggested-action")
+        play.set_halign(Gtk.Align.START)
+        play.connect("clicked",
+                     lambda *_: self.window.service.play_tracks(tracks))
+        box.append(play)
+        tl = TrackList(self.window, show_art=False)
+        tl.set_tracks(tracks)
+        box.append(tl)
+        self.show_widget(scroll_wrap(_padded(box)))
 
 
 class PlaylistsPage(ContentPage):

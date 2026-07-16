@@ -118,6 +118,10 @@ def build_track_menu(window, track: Track, on_favorite=None):
     sec2.append(fav, "trk.favorite")
     sec2.append("Add to Playlist…", "trk.add-playlist")
     sec2.append("Download", "trk.download")
+    dis = ("Allow Again"
+           if window.library.is_disliked(track.video_id)
+           else "Never Play This")
+    sec2.append(dis, "trk.dislike")
     menu.append_section(None, sec2)
 
     sec3 = Gio.Menu()
@@ -132,6 +136,15 @@ def build_track_menu(window, track: Track, on_favorite=None):
         added = window.library.toggle_favorite(track)
         window.toast("Added to favorites" if added else "Removed from favorites")
 
+    def toggle_dislike():
+        if window.library.is_disliked(track.video_id):
+            window.library.remove_dislike(track.video_id)
+            window.toast(f"“{track.title}” allowed again")
+        else:
+            window.library.add_dislike(track)
+            window.toast(
+                f"“{track.title}” won't appear in radio or AI Mix anymore")
+
     def go_artist():
         for aid in track.artist_ids:
             if aid:
@@ -145,6 +158,7 @@ def build_track_menu(window, track: Track, on_favorite=None):
                               window.toast("Added to queue")),
         "radio": lambda: window.service.play_track_with_radio(track),
         "favorite": on_favorite or default_favorite,
+        "dislike": toggle_dislike,
         "add-playlist": lambda: window.choose_playlist_for(track),
         "download": lambda: window.download_track(track),
         "go-album": lambda: window.open_album(track.album_id),
