@@ -1,50 +1,48 @@
-## Riff 0.11.0 🎵
+## Riff 0.12.2 🎵
 
-**For you on Home (default)** — like RiPlay’s top picks: Home always leads with a **For you** song list. AI fills it when a provider/local model is ready; otherwise smart radio from your history. Auto-refresh is on by default — seamless, no extra clicks.
+**In-app video + polished folders** — watch music videos in the now-playing cover slot while audio stays on mpv; folder badges match flat reference icons.
 
-## Riff 0.10.3 🎵
+### What’s new since 0.8.0
 
-**AI Mixes on Home** — earlier card-based AI Mixes row (replaced by For you in 0.11).
+#### Video (0.12)
+- **In-app music video** plays in the cover-art slot (GStreamer + muted video; mpv keeps audio)
+- Toggle video from the now-playing cover when a video stream is available
 
-## Riff 0.10.2 🎵
+#### Playlist folders (0.10–0.11)
+- **Spotify-style folders** — create from sidebar **＋ New**, nest playlists, expand/collapse
+- Drag-and-drop playlists into folders; move from the Playlists page
+- **Colored folder badges** with custom emoji; right-click folder menu
+- Flat badge style aligned with desktop folder icons
 
-**Local AI model picker** — Settings → AI Mix → Local offers several curated GGUFs (Qwen 1.5B/3B/7B, Llama 3.2 3B, Gemma 2 2B). ★ marks Riff’s recommended pick (Qwen 2.5 3B).
+#### Home & AI (0.9–0.11)
+- **For you** strip on Home — AI picks when a provider/local model is ready, else smart radio from history
+- **Local AI** — in-process GGUF (no Ollama); model picker (Qwen, Llama, Gemma) with a recommended default
+- Clickable now-playing title/cover → album; artist name → artist page
 
-## Riff 0.10.1 🎵
-
-**Clickable now-playing** — tap the song title or cover to open the album/single, tap the artist name to open the artist page (when YouTube Music provides those links).
-
-## Riff 0.10.0 🎵
-
-**Playlist folders** (Spotify-style) — create folders from the sidebar **＋ New** menu, nest playlists inside, expand/collapse in the sidebar. Move playlists between folders from the Playlists page.
-A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
+#### Library & UX (0.8.1–0.8.2)
+- **Add** on public playlists — one-click local snapshot
+- Icons that stay visible on CachyOS / elementary / Breeze dark themes
+- Stable player-bar height for video thumbnails
 
 ### Highlights
 - Stream songs, albums, artists and playlists from YouTube Music — no ads, no account
-- **Playlist folders** — organize local playlists like Spotify
-- **Local AI** for AI Mix — one-click install, on-device inference (no Ollama)
-- **Add** button on public playlists — one click to copy them into your local library
-- Icons that stay visible on CachyOS / elementary / Breeze dark themes
-- Radio autoplay: when the queue runs out, related songs keep playing
-- Queue with shuffle, repeat (off/all/one), play-next and add-to-queue
-- Favorites, listening history and local playlists (SQLite)
-- Offline downloads via yt-dlp
-- Lyrics for the current song
-- MPRIS2 integration: media keys, GNOME/KDE widgets, `playerctl`
-- Stream prefetching for instant track changes
+- Playlist folders, local AI Mix, in-app video in the cover slot
+- Radio autoplay, queue (shuffle/repeat), favorites, history, offline downloads
+- Lyrics, MPRIS2, stream prefetching
 
 ### Install on CachyOS / Arch
 
 ```bash
 paru -S python-ytmusicapi          # AUR dependency
-git clone https://github.com/aimdi/player.git
-cd player/packaging && makepkg -si
+git clone https://github.com/Aimdi/Riff.git
+cd Riff/packaging && makepkg -si
 ```
 
 or without makepkg: `./install.sh`
 
-The attached wheel can also be installed directly (system deps: `gtk4
-libadwaita python-gobject mpv`):
+Update an existing install: `riff-update`
+
+The attached wheel can also be installed directly (system deps: `gtk4`, `libadwaita`, `python-gobject`, `mpv`; video needs GStreamer gtk4paintablesink plugins):
 
 ```bash
 pip install --user riff_player-*.whl ytmusicapi yt-dlp
