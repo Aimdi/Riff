@@ -1,10 +1,11 @@
-## Riff 0.8.0 🎵
+## Riff 0.8.1 🎵
 
-New **Pitch Black** theme — and it's now the default: true-black backgrounds everywhere with a green accent, in the spirit of Notesnook's Pitch Black (perfect for OLED). Pick your look under Settings → Appearance: Pitch Black, Dark, Light, or Follow system — switches apply instantly, no restart.
+**Add** public playlists to your library: open any YouTube Music playlist and hit **Add** to save a local snapshot of its tracks. It shows up in the sidebar next to your other playlists.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights
 - Stream songs, albums, artists and playlists from YouTube Music — no ads, no account
+- **Add** button on public playlists — one click to copy them into your local library
 - Radio autoplay: when the queue runs out, related songs keep playing
 - Queue with shuffle, repeat (off/all/one), play-next and add-to-queue
 - Favorites, listening history and local playlists (SQLite)

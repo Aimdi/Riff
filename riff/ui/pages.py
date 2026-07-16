@@ -433,11 +433,37 @@ class PlaylistPage(_DetailPage):
         subtitle_parts = [pl.author, f"{pl.track_count or len(pl.tracks)} songs"]
         box.append(self._header(
             pl.thumbnail, pl.title,
-            " · ".join(p for p in subtitle_parts if p), pl.tracks))
+            " · ".join(p for p in subtitle_parts if p), pl.tracks,
+            extra_button=self._add_button(pl)))
         tl = TrackList(self.window)
         tl.set_tracks(pl.tracks)
         box.append(tl)
         self.show_widget(scroll_wrap(_padded(box)))
+
+    def _add_button(self, pl: Playlist) -> Gtk.Button:
+        """Snapshot this public playlist into a local one."""
+        btn = Gtk.Button()
+        btn.set_child(_button_content("list-add-symbolic", "Add"))
+        btn.add_css_class("pill")
+        btn.set_tooltip_text("Save a local copy of this playlist")
+
+        def on_clicked(_b: Gtk.Button) -> None:
+            if not pl.tracks:
+                self.window.toast("No songs to add")
+                return
+            name = pl.title.strip() or "Playlist"
+            lib = self.window.library
+            pid = lib.create_playlist(name)
+            lib.replace_playlist_tracks(pid, pl.tracks)
+            self.window.reload_sidebar_playlists()
+            n = len(pl.tracks)
+            plural = "song" if n == 1 else "songs"
+            self.window.toast(f"Added “{name}” · {n} {plural}")
+            btn.set_sensitive(False)
+            btn.set_child(_button_content("list-add-symbolic", "Added"))
+
+        btn.connect("clicked", on_clicked)
+        return btn
 
 
 class ArtistPage(_DetailPage):
