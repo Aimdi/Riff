@@ -105,7 +105,7 @@ def test_play_tracks_resolves_and_plays(monkeypatch):
     # only the current track starts playing...
     assert engine.played == ["https://stream/v0"]
     # ...but the next one is prefetched
-    assert resolver.resolved == ["v0", "v1"]
+    assert resolver.resolved == [("v0", False), ("v1", False)]
 
 
 def test_track_end_advances(monkeypatch):
