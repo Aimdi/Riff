@@ -68,6 +68,7 @@ class HomePage(ContentPage):
         super().__init__(window)
         self._loaded = False
         self._box: Gtk.Box | None = None
+        self._top: Gtk.Box | None = None
 
     def refresh(self, force: bool = False) -> None:
         if self._loaded and not force:
@@ -76,17 +77,30 @@ class HomePage(ContentPage):
 
     def _present(self, sections) -> None:
         self._loaded = True
-        if not sections:
-            self.show_widget(status_page(
-                "emblem-music-symbolic", "Nothing here yet",
-                "Could not load recommendations — try searching instead."))
-            return
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         box.set_margin_top(18)
         box.set_margin_bottom(120)
         box.set_margin_start(18)
         box.set_margin_end(18)
-        for section in sections:
+
+        # Fixed top strip: AI Mixes, then followed-artist releases, then YT home.
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        box.append(top)
+        self._top = top
+        self._box = box
+
+        ai_items = self._ai_mix_cards()
+        if ai_items:
+            top.append(Carousel("AI Mixes", ai_items, self.window))
+
+        if not sections and not ai_items:
+            self.show_widget(status_page(
+                "emblem-music-symbolic", "Nothing here yet",
+                "Could not load recommendations — try searching instead."))
+            self._load_followed_releases(top)
+            return
+
+        for section in sections or []:
             tracks = [i for i in section.items if isinstance(i, Track)]
             others = [i for i in section.items if not isinstance(i, Track)]
             if others:
@@ -99,12 +113,41 @@ class HomePage(ContentPage):
                 tl = TrackList(self.window, radio_on_single=True)
                 tl.set_tracks(tracks[:10])
                 box.append(tl)
-        self._box = box
         self.show_widget(scroll_wrap(box))
-        self._load_followed_releases(box)
+        self._load_followed_releases(top)
 
-    def _load_followed_releases(self, box: Gtk.Box) -> None:
-        """Prepend a 'new from your artists' carousel once it's fetched."""
+    def _ai_mix_cards(self) -> list:
+        """Cards for the Home “AI Mixes” row (local playlist + generate)."""
+        from .window import AI_MIX_PLAYLIST
+
+        items: list = []
+        lib = self.window.library
+        pid = lib.find_playlist(AI_MIX_PLAYLIST)
+        if pid is not None:
+            tracks = lib.playlist_tracks(pid)
+            if tracks:
+                cover = tracks[0].thumbnail or ""
+                n = len(tracks)
+                plural = "song" if n == 1 else "songs"
+                items.append(Playlist(
+                    playlist_id=f"local:{pid}",
+                    title=AI_MIX_PLAYLIST,
+                    author=f"{n} {plural} · your mix",
+                    thumbnail=cover,
+                    track_count=n,
+                ))
+        # Always offer generate/refresh so the row stays useful when empty.
+        items.append(Playlist(
+            playlist_id="action:ai-mix",
+            title="✨ Generate AI Mix",
+            author="Fresh picks from your taste",
+            thumbnail="",
+            track_count=0,
+        ))
+        return items
+
+    def _load_followed_releases(self, top: Gtk.Box) -> None:
+        """Append a 'new from your artists' carousel under AI Mixes."""
         follows = self.window.library.followed_artists()[:6]
         if not follows:
             return
@@ -123,8 +166,8 @@ class HomePage(ContentPage):
             return items
 
         def done(items) -> None:
-            if items and box is self._box:
-                box.prepend(Carousel(
+            if items and top is self._top:
+                top.append(Carousel(
                     "New from artists you follow", items, self.window))
 
         run_async(work, done, lambda _e: None, name="riff-follows")

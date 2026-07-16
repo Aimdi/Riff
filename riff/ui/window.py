@@ -1126,12 +1126,18 @@ class MainWindow(Adw.ApplicationWindow):
             config.settings.set(
                 "ai_mix_last_refresh", datetime.date.today().isoformat())
             self.reload_sidebar_playlists()
+            # Refresh Home so the AI Mixes row at the top shows the new cover.
+            home = self.pages.get("home")
+            if home is not None and hasattr(home, "refresh"):
+                home._loaded = False
+                if self.stack.get_visible_child_name() == "home":
+                    home.refresh(force=True)
             if interactive:
                 self.service.play_tracks(tracks)
                 dialog.close()
             self.toast(
-                f"AI Mix refreshed: {len(tracks)} songs — saved to "
-                f"“{AI_MIX_PLAYLIST}” in the sidebar")
+                f"AI Mix refreshed: {len(tracks)} songs — on Home and "
+                f"in “{AI_MIX_PLAYLIST}”")
 
         def fail(exc: Exception) -> None:
             if not interactive:

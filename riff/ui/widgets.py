@@ -319,7 +319,17 @@ class MediaCard(Gtk.FlowBoxChild):
         if isinstance(item, Album):
             self._window.open_album(item.browse_id)
         elif isinstance(item, Playlist):
-            self._window.open_playlist(item.playlist_id)
+            pid = item.playlist_id or ""
+            if pid == "action:ai-mix":
+                self._window.start_ai_mix()
+            elif pid.startswith("local:"):
+                try:
+                    local_id = int(pid.split(":", 1)[1])
+                except ValueError:
+                    return
+                self._window.open_local_playlist(local_id, item.title)
+            else:
+                self._window.open_playlist(pid)
         elif isinstance(item, Artist):
             if item.browse_id:
                 self._window.open_artist(item.browse_id)

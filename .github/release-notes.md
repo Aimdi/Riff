@@ -1,3 +1,7 @@
+## Riff 0.10.3 🎵
+
+**AI Mixes on Home** — an “AI Mixes” row sits at the top of Home (above Fresh finds / likes). Open your mix or tap Generate AI Mix from there.
+
 ## Riff 0.10.2 🎵
 
 **Local AI model picker** — Settings → AI Mix → Local offers several curated GGUFs (Qwen 1.5B/3B/7B, Llama 3.2 3B, Gemma 2 2B). ★ marks Riff’s recommended pick (Qwen 2.5 3B).
