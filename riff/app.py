@@ -142,6 +142,7 @@ class RiffApplication(Adw.Application):
         # layout & misc
         add("new-playlist", win.create_playlist_dialog, "<Alt><Shift>p")
         add("toggle-sidebar", win._toggle_sidebar, "<Alt><Shift>l")
+        add("now-playing", win.toggle_now_playing, "<Alt><Shift>n")
         add("mini-player", win.open_mini_player, "<Alt><Shift>m")
         add("lyrics", win.show_lyrics, "<Alt><Shift>y")
         add("shortcuts", win.show_shortcuts, "<Ctrl>slash", "question")

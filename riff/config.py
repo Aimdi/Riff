@@ -29,6 +29,7 @@ DEFAULTS = {
     "audio_quality": "high",  # "high" | "medium" | "low"
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
+    "crossfade": 0,  # seconds of blend between songs, 0 = off
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",

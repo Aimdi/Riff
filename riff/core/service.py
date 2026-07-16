@@ -38,7 +38,7 @@ class PlaybackService:
     ):
         self.api = api
         self.library = library
-        self.engine = engine
+        self._engine = engine
         self.resolver = resolver or StreamResolver(
             quality=config.settings.get("audio_quality", "high")
         )
@@ -63,16 +63,31 @@ class PlaybackService:
         self._video_state = STATE_STOPPED
         self._video_pos_id = None
 
+        # Crossfade: a second mpv deck fades in the next song while the
+        # current one fades out (Spotify-style). Spare deck is created
+        # lazily on the first fade and then reused forever.
+        self._spare_engine: PlayerEngine | None = None
+        self._fading = False
+        self._fade_old = None
+
         self.queue.on_changed = self._emit_queue_changed
+        self._attach_engine(engine)
+
+        self.engine.set_volume(int(config.settings.get("volume", 100)))
+
+    # -- public control ------------------------------------------------------
+
+    @property
+    def engine(self):
+        """The active audio deck (swaps during a crossfade)."""
+        return self._engine
+
+    def _attach_engine(self, engine) -> None:
         engine.on_state = self._on_engine_state
         engine.on_position = self._on_engine_position
         engine.on_duration = lambda d: self._emit(self.duration_listeners, d)
         engine.on_track_ended = self._on_track_ended
         engine.on_error = self._on_engine_error
-
-        self.engine.set_volume(int(config.settings.get("volume", 100)))
-
-    # -- public control ------------------------------------------------------
 
     @property
     def current_track(self) -> Track | None:
@@ -148,6 +163,7 @@ class PlaybackService:
 
     def stop(self) -> None:
         self._play_token += 1
+        self._cancel_fade()
         self._stop_video_backend()
         self.engine.stop()
 
@@ -193,7 +209,14 @@ class PlaybackService:
 
     def shutdown(self) -> None:
         self._play_token += 1
+        self._cancel_fade()
         self._stop_video_backend()
+        if self._spare_engine is not None:
+            try:
+                self._spare_engine.shutdown()
+            except Exception:  # noqa: BLE001
+                pass
+            self._spare_engine = None
         self.engine.shutdown()
 
     # -- internals -------------------------------------------------------------
@@ -215,6 +238,147 @@ class PlaybackService:
     def _on_engine_position(self, pos: float) -> None:
         # Scrubber always follows mpv audio (video is visual-only).
         self._emit(self.position_listeners, pos)
+        self._maybe_begin_crossfade(pos)
+
+    # -- crossfade ------------------------------------------------------------
+
+    def _crossfade_seconds(self) -> float:
+        try:
+            return max(0.0, min(12.0, float(
+                config.settings.get("crossfade", 0) or 0)))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _next_instant_uri(self) -> str | None:
+        """URI for the next track only if playable *right now* (local file
+        or prefetched stream) — a crossfade can't wait for the network."""
+        nxt = self.queue.peek_next()
+        if nxt is None:
+            return None
+        import os
+
+        if nxt.local_path and os.path.exists(nxt.local_path):
+            return nxt.local_path
+        if nxt.video_id:
+            local = self.library.download_path(nxt.video_id)
+            if local and os.path.exists(local):
+                return local
+            return self.resolver.cached(nxt.video_id)
+        return None
+
+    def _maybe_begin_crossfade(self, pos: float) -> None:
+        if self._fading:
+            return
+        fade = self._crossfade_seconds()
+        if fade <= 0 or self.video_mode or self._using_gst_video:
+            return
+        duration = float(self.engine.duration or 0)
+        # Overlapping most of a very short track sounds broken.
+        if duration <= fade * 2.5 or pos < duration - fade:
+            return
+        uri = self._next_instant_uri()
+        if not uri:
+            return
+        self._begin_crossfade(uri, fade)
+
+    def _obtain_spare(self):
+        if self._spare_engine is None:
+            self._spare_engine = type(self._engine)(
+                dispatcher=getattr(self._engine, "_dispatch", None),
+                extra_options=getattr(self._engine, "_extra_options", None))
+        spare, self._spare_engine = self._spare_engine, None
+        return spare
+
+    def _begin_crossfade(self, uri: str, fade: float) -> None:
+        self._maybe_scrobble()
+        old = self._engine
+        target = int(config.settings.get("volume", 100))
+        spare = self._obtain_spare()
+
+        self._fading = True
+        self._fade_old = old
+        # New deck becomes the app's engine immediately: position, state
+        # and MPRIS all follow the incoming song.
+        self._attach_engine(spare)
+        spare.set_volume(0)
+        spare.play_uri(uri)
+        self._engine = spare
+
+        # Advance the queue and tell the UI — Spotify shows the next song
+        # as soon as the blend starts.
+        self._play_token += 1
+        self._scrobbled_current = False
+        if self.queue.next(manual=False) is None:
+            pass  # repeat-off tail handled by normal end when fade finishes
+        track = self.queue.current
+        if track is not None:
+            self._emit(self.track_listeners, track)
+            self._after_start(track)
+
+        start_pos = float(old.position or 0)
+
+        def old_position(p: float) -> None:
+            t = (float(p) - start_pos) / fade if fade else 1.0
+            self._apply_fade(min(1.0, max(0.0, t)), target)
+
+        # The outgoing deck only drives the blend now.
+        old.on_state = None
+        old.on_duration = None
+        old.on_error = None
+        old.on_position = old_position
+        old.on_track_ended = lambda: self._finish_fade(target)
+
+        # Timer smoothing (position events can be sparse). Best-effort:
+        # without a main loop the position events alone still complete it.
+        try:
+            from gi.repository import GLib
+
+            begun = None
+
+            def tick() -> bool:
+                nonlocal begun
+                import time as _t
+
+                if not self._fading or self._fade_old is not old:
+                    return False
+                begun = begun or _t.monotonic()
+                self._apply_fade(
+                    min(1.0, (_t.monotonic() - begun) / fade), target)
+                return self._fading
+            GLib.timeout_add(100, tick)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _apply_fade(self, t: float, target: int) -> None:
+        if not self._fading or self._fade_old is None:
+            return
+        # Equal-power curve: constant perceived loudness through the blend.
+        import math
+
+        fade_in = math.sin(t * math.pi / 2)
+        fade_out = math.cos(t * math.pi / 2)
+        self._fade_old.set_volume(int(round(target * fade_out)))
+        self._engine.set_volume(int(round(target * fade_in)))
+        if t >= 1.0:
+            self._finish_fade(target)
+
+    def _finish_fade(self, target: int) -> None:
+        if not self._fading:
+            return
+        self._fading = False
+        old, self._fade_old = self._fade_old, None
+        if old is not None:
+            old.on_position = None
+            old.on_track_ended = None
+            old.stop()
+            old.set_volume(target)
+            self._spare_engine = old  # reuse as the next spare deck
+        self._engine.set_volume(target)
+
+    def _cancel_fade(self) -> None:
+        """Abort a blend instantly (user skipped or started something new)."""
+        if self._fading:
+            self._finish_fade(int(config.settings.get("volume", 100)))
 
     def _ensure_video_player(self) -> GstVideoPlayer:
         if self._video is None:
@@ -228,6 +392,7 @@ class PlaybackService:
         track = self.queue.current
         if track is None:
             return
+        self._cancel_fade()
         self._play_token += 1
         self._scrobbled_current = False
         token = self._play_token

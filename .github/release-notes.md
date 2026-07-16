@@ -1,6 +1,6 @@
-## Riff 0.15.0 🎵
+## Riff 0.16.0 🎵
 
-**Home, the Spotify way.** The Home page now opens with a time-of-day greeting (using your profile name) and a Spotify-style shortcut grid: a gradient Liked Songs tile, your ✨ AI Mix, and your most recent playlists as compact cover+name tiles — one click from anything you play daily. Album and playlist cards everywhere gained Spotify's hover play button: a green circle appears over the artwork and starts the music immediately, without opening the page first.
+**Now Playing panel + real crossfade.** The ♪ button (or Alt+Shift+N) opens a Spotify-style right panel: big artwork, clickable song/artist links, a heart, and Up Next — it shares the flap with the queue, one always swaps for the other. And under Settings → Playback there's now **Crossfade (0–12 s)**: Riff runs a second mpv deck and blends the end of the current song into the start of the next with an equal-power volume curve, just like Spotify. Crossfade kicks in whenever the next song is prefetched (which Riff already does constantly).
 
 ### What’s new since 0.8.0
 

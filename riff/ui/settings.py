@@ -67,6 +67,17 @@ class SettingsDialog(Adw.PreferencesDialog):
         quality.connect("notify::selected", self._on_quality)
         playback.add(quality)
 
+        crossfade = Adw.SpinRow.new_with_range(0, 12, 1)
+        crossfade.set_title("Crossfade")
+        crossfade.set_subtitle(
+            "Seconds of blend between songs (like Spotify) — 0 turns it off")
+        crossfade.set_value(float(config.settings.get("crossfade", 0) or 0))
+        crossfade.connect(
+            "notify::value",
+            lambda row, _p: config.settings.set(
+                "crossfade", int(row.get_value())))
+        playback.add(crossfade)
+
         radio = Adw.SwitchRow()
         radio.set_title("Radio autoplay")
         radio.set_subtitle("Keep playing similar songs when the queue ends")

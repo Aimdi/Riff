@@ -199,6 +199,7 @@ class PlayerEngine:
 
     def __init__(self, dispatcher=None, extra_options: dict | None = None):
         self._dispatch = dispatcher or (lambda fn, *a: fn(*a))
+        self._extra_options = dict(extra_options) if extra_options else None
         self._mpv = _Mpv(extra_options)
         self.on_state = None
         self.on_position = None

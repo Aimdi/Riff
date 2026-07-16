@@ -228,6 +228,14 @@ class PlayerBar(Gtk.Box):
                             lambda _b, v: self.service.set_volume(int(v)))
         right.append(self.volume)
 
+        self.now_btn = Gtk.ToggleButton()
+        now_glyph = Gtk.Label(label="♪")
+        now_glyph.add_css_class("riff-heart")
+        self.now_btn.set_child(now_glyph)
+        self.now_btn.add_css_class("flat")
+        self.now_btn.set_tooltip_text("Now Playing panel")
+        right.append(self.now_btn)
+
         self.queue_btn = Gtk.ToggleButton()
         iconutil.set_button(self.queue_btn, "view-list-ordered-symbolic")
         self.queue_btn.add_css_class("flat")

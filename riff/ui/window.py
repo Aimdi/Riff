@@ -318,11 +318,17 @@ class MainWindow(Adw.ApplicationWindow):
         split.set_content(content_box)
         self._apply_sidebar_mode()
 
-        # queue flap on the right --------------------------------------------
+        # right panel: queue / Now Playing share one flap (like Spotify) ----
+        from .now_playing import NowPlayingPanel
+
         self.queue_panel = QueuePanel(self)
         self.queue_split = Adw.OverlaySplitView()
         self.queue_split.set_sidebar_position(Gtk.PackType.END)
-        self.queue_split.set_sidebar(self.queue_panel)
+        self.right_stack = Gtk.Stack()
+        self.right_stack.set_transition_type(
+            Gtk.StackTransitionType.CROSSFADE)
+        self.right_stack.add_named(self.queue_panel, "queue")
+        self.queue_split.set_sidebar(self.right_stack)
         self.queue_split.set_content(split)
         self.queue_split.set_show_sidebar(False)
         self.queue_split.set_min_sidebar_width(300)
@@ -330,7 +336,11 @@ class MainWindow(Adw.ApplicationWindow):
 
         # player bar + toasts (video plays inside the cover-art slot)
         self.player_bar = PlayerBar(self)
+        self.now_playing_panel = NowPlayingPanel(self)
+        self.right_stack.add_named(self.now_playing_panel, "now")
+        self._right_sync = False
         self.player_bar.queue_btn.connect("toggled", self._on_queue_toggle)
+        self.player_bar.now_btn.connect("toggled", self._on_now_toggle)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         outer.append(self.queue_split)
@@ -783,7 +793,32 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_playlist(row.ref)
 
     def _on_queue_toggle(self, btn) -> None:
-        self.queue_split.set_show_sidebar(btn.get_active())
+        self._show_right_panel("queue" if btn.get_active() else None)
+
+    def _on_now_toggle(self, btn) -> None:
+        self._show_right_panel("now" if btn.get_active() else None)
+
+    def _show_right_panel(self, which: str | None) -> None:
+        if self._right_sync:
+            return
+        self._right_sync = True
+        try:
+            bar = self.player_bar
+            if which is None:
+                if not (bar.queue_btn.get_active()
+                        or bar.now_btn.get_active()):
+                    self.queue_split.set_show_sidebar(False)
+            else:
+                (bar.now_btn if which == "queue" else
+                 bar.queue_btn).set_active(False)
+                self.right_stack.set_visible_child_name(which)
+                self.queue_split.set_show_sidebar(True)
+        finally:
+            self._right_sync = False
+
+    def toggle_now_playing(self) -> None:
+        btn = self.player_bar.now_btn
+        btn.set_active(not btn.get_active())
 
     def set_video_mode(self, enabled: bool) -> None:
         """Play video in the cover-art slot (or restore the thumbnail)."""
@@ -1236,6 +1271,7 @@ class MainWindow(Adw.ApplicationWindow):
             ("Stats", "Alt Shift T"),
         ]),
         ("Layout", [
+            ("Now Playing panel", "Alt Shift N"),
             ("Toggle sidebar rail", "Alt Shift L"),
             ("Mini player", "Alt Shift M"),
             ("Lyrics", "Alt Shift Y"),
