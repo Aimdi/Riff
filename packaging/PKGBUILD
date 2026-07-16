@@ -40,11 +40,15 @@ pkgver() {
 
 build() {
   cd "$_srcdir"
+  # Clean stale wheels from previous builds — package() globs this
+  # directory, and two wheels would collide on the same installed files.
+  rm -rf "$srcdir/dist"
   python -m build --wheel --no-isolation --outdir "$srcdir/dist"
 }
 
 package() {
-  python -m installer --destdir="$pkgdir" "$srcdir"/dist/*.whl
+  python -m installer --destdir="$pkgdir" \
+    "$srcdir"/dist/riff_player-*-py3-none-any.whl
 
   install -Dm644 "$_srcdir/data/io.github.aimdi.Riff.desktop" \
     "$pkgdir/usr/share/applications/io.github.aimdi.Riff.desktop"

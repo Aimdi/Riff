@@ -7,7 +7,7 @@ name = "riff-player"
 dynamic = ["version"]
 description = "Native YouTube Music player for Linux (GTK4 + libadwaita + mpv)"
 readme = "README.md"
-license = { text = "GPL-3.0-or-later" }
+license = "GPL-3.0-or-later"
 requires-python = ">=3.11"
 authors = [{ name = "Riff contributors" }]
 dependencies = [
