@@ -878,7 +878,7 @@ class PlaylistsPage(ContentPage):
 
         block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        fcolor = item.get("color") or "#3b82f6"
+        fcolor = item.get("color") or "#38bdf8"
         femoji = item.get("emoji") or "🎵"
         icon_btn = Gtk.Button()
         icon_btn.add_css_class("flat")
