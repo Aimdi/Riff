@@ -209,18 +209,31 @@ def suggest_songs(api_key: str, recent: list[Track], favorites: list[Track],
         ) from exc
 
     client = anthropic.Anthropic(api_key=api_key)
+    kwargs = dict(
+        model=MODEL,
+        # generous budget: with adaptive thinking, reasoning tokens count
+        # against max_tokens — 4096 was truncating the JSON on long mixes
+        max_tokens=16000,
+        thinking={"type": "adaptive"},
+        system=_SYSTEM,
+        messages=[{"role": "user",
+                   "content": build_prompt(recent, favorites, count,
+                                           **context)}],
+        output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
+    )
     try:
-        response = client.messages.create(
-            model=MODEL,
-            max_tokens=4096,
-            thinking={"type": "adaptive"},
-            system=_SYSTEM,
-            messages=[{"role": "user",
-                       "content": build_prompt(recent, favorites, count,
-                                               **context)}],
-            output_config={"format": {"type": "json_schema",
-                                      "schema": _SCHEMA}},
-        )
+        try:
+            response = client.messages.create(**kwargs)
+        except TypeError:
+            # Older anthropic SDKs don't know output_config/thinking —
+            # fall back to a plain JSON instruction (extract_json copes).
+            log.warning("old anthropic SDK detected; using plain JSON prompt")
+            kwargs.pop("output_config", None)
+            kwargs.pop("thinking", None)
+            kwargs["system"] = _SYSTEM + (
+                ' Respond ONLY with a JSON object of the form '
+                '{"songs": [{"title": "...", "artist": "..."}]}.')
+            response = client.messages.create(**kwargs)
     except anthropic.AuthenticationError as exc:
         raise RuntimeError("Invalid Anthropic API key — check Settings") from exc
     except anthropic.RateLimitError as exc:
@@ -232,6 +245,8 @@ def suggest_songs(api_key: str, recent: list[Track], favorites: list[Track],
 
     if response.stop_reason == "refusal":
         raise RuntimeError("The model declined this request")
+    if response.stop_reason == "max_tokens":
+        raise RuntimeError("The model's answer was cut short — try again")
     text = next((b.text for b in response.content if b.type == "text"), "")
     if not text:
         raise RuntimeError("The model returned no suggestions")

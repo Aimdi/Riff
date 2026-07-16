@@ -1,6 +1,6 @@
-## Riff 0.4.0 🎵
+## Riff 0.4.1 🎵
 
-AI Mix is now a refreshing playlist: each run saves the mix to a "✨ AI Mix" playlist in the sidebar (replacing the previous one) and starts playing it — and the curation prompt got a major upgrade. The model now sees your most-played songs with play counts, favorites, recent plays, followed artists, and the previous mix (which it is told never to repeat), and curates with structure: ~50% taste-adjacent, ~30% deeper cuts, ~20% discoveries, max 2 songs per artist, ordered to flow. Works with both the Anthropic and OpenAI-compatible providers.
+AI Mix now shows a progress window (taste analysis → per-song resolution progress) instead of a transient toast, and failures stay visible in the window until you close it — no more silent "nothing happened". Also fixes a real failure cause: the Claude request had too small a token budget (thinking could truncate the JSON; now 16k), truncated responses are detected explicitly, and older python-anthropic versions without newer API parameters fall back to a plain JSON prompt automatically.
 A native YouTube Music player for CachyOS / Arch Linux (GTK4 + libadwaita + mpv).
 
 ### Highlights

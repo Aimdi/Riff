@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from gi.repository import Adw, Gio, Gtk
+from gi.repository import Adw, Gio, GLib, Gtk
 
 from .. import APP_NAME, config
 from ..core.models import Track
@@ -525,6 +525,30 @@ class MainWindow(Adw.ApplicationWindow):
                 self.show_settings()
                 return
 
+        # Progress window: a long AI call must never look like "nothing
+        # happened" — status stays visible and errors persist until closed.
+        dialog = Adw.Dialog.new()
+        dialog.set_title("AI Mix")
+        dialog.set_content_width(380)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        box.append(Adw.HeaderBar())
+        spinner = Gtk.Spinner()
+        spinner.set_size_request(32, 32)
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.start()
+        box.append(spinner)
+        status_label = Gtk.Label(label="Reading your listening history…")
+        status_label.set_wrap(True)
+        status_label.set_margin_start(20)
+        status_label.set_margin_end(20)
+        status_label.set_margin_bottom(24)
+        box.append(status_label)
+        dialog.set_child(box)
+        dialog.present(self)
+
+        def set_status(text: str) -> None:
+            GLib.idle_add(lambda: (status_label.set_label(text), False)[1])
+
         def work():
             recent = self.library.recent(40)
             favorites = self.library.favorites()[:40]
@@ -541,6 +565,8 @@ class MainWindow(Adw.ApplicationWindow):
                 "following": following,
                 "avoid": previous_mix,
             }
+            set_status("Analyzing your taste and curating songs…\n"
+                       "(this can take up to a minute)")
             if provider == "openai":
                 suggestions = ai.suggest_songs_openai(
                     base_url, openai_key, model, recent, favorites, **context)
@@ -550,7 +576,9 @@ class MainWindow(Adw.ApplicationWindow):
             known = ({t.video_id for t in recent}
                      | {t.video_id for t in previous_mix})
             tracks, seen = [], set()
-            for title, artist in suggestions:
+            for i, (title, artist) in enumerate(suggestions, 1):
+                set_status(
+                    f"Finding songs on YouTube Music… {i}/{len(suggestions)}")
                 try:
                     results = self.api.search(f"{title} {artist}", "songs")
                 except Exception:  # noqa: BLE001 — skip unresolvable songs
@@ -570,14 +598,18 @@ class MainWindow(Adw.ApplicationWindow):
             self.library.replace_playlist_tracks(pid, tracks)
             self.reload_sidebar_playlists()
             self.service.play_tracks(tracks)
+            dialog.close()
             self.toast(
                 f"AI Mix refreshed: {len(tracks)} songs — saved to "
                 f"“{AI_MIX_PLAYLIST}” in the sidebar")
 
-        self.toast("Refreshing your AI Mix — this takes a few seconds…")
-        run_async(work, done,
-                  lambda exc: self.toast(f"AI Mix failed: {exc}"),
-                  name="riff-ai-mix")
+        def fail(exc: Exception) -> None:
+            spinner.stop()
+            spinner.set_visible(False)
+            status_label.set_label(f"AI Mix failed:\n{exc}")
+            status_label.add_css_class("error")
+
+        run_async(work, done, fail, name="riff-ai-mix")
 
     def show_about(self) -> None:
         from .. import __version__
