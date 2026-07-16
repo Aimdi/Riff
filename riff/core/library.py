@@ -202,7 +202,7 @@ class Library:
 
     # -- playlist folders (Spotify-style) --------------------------------------
 
-    DEFAULT_FOLDER_COLOR = "#3b82f6"
+    DEFAULT_FOLDER_COLOR = "#38bdf8"
     DEFAULT_FOLDER_EMOJI = "🎵"
 
     @staticmethod
