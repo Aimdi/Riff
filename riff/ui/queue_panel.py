@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from gi.repository import Gdk, GObject, Gtk, Pango
 
-from .widgets import CoverArt, build_track_menu
+from .widgets import CoverArt, build_track_menu, menu_dots_button
 
 
 class QueuePanel(Gtk.Box):
@@ -89,10 +89,7 @@ class QueuePanel(Gtk.Box):
             text.append(a)
             box.append(text)
 
-            menu_btn = Gtk.MenuButton()
-            menu_btn.set_icon_name("view-more-symbolic")
-            menu_btn.add_css_class("flat")
-            menu_btn.set_valign(Gtk.Align.CENTER)
+            menu_btn = menu_dots_button()
             menu, group = build_track_menu(self.window, track)
             menu_btn.set_menu_model(menu)
             row.insert_action_group("trk", group)

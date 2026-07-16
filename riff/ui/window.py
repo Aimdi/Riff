@@ -47,6 +47,13 @@ CSS = b"""
     font-weight: 700;
     font-size: 1.1em;
 }
+.riff-heart {
+    font-size: 17px;
+    font-weight: 700;
+}
+button.dim-label .riff-heart {
+    opacity: 0.55;
+}
 """
 
 SIDEBAR_ITEMS = [

@@ -47,6 +47,45 @@ class CoverArt(Gtk.Frame):
         images.load_texture(url, max(self.size * 2, 96), apply)
 
 
+def heart_button(is_favorite: bool = False, tooltip: str = "Favorite") -> Gtk.Button:
+    """Favorite button drawn with a text glyph.
+
+    Icon-theme lookups proved unreliable across desktops (KDE's Breeze lacks
+    emblem-favorite-symbolic and friends), so the heart is a plain font
+    character — it renders everywhere, unconditionally.
+    """
+    btn = Gtk.Button()
+    label = Gtk.Label(label="♥")
+    label.add_css_class("riff-heart")
+    btn.set_child(label)
+    btn.add_css_class("flat")
+    btn.set_valign(Gtk.Align.CENTER)
+    btn.set_tooltip_text(tooltip)
+    set_heart_state(btn, is_favorite)
+    return btn
+
+
+def set_heart_state(btn: Gtk.Button, is_favorite: bool) -> None:
+    if is_favorite:
+        btn.add_css_class("accent")
+        btn.remove_css_class("dim-label")
+    else:
+        btn.remove_css_class("accent")
+        btn.add_css_class("dim-label")
+
+
+def menu_dots_button(tooltip: str = "More actions") -> Gtk.MenuButton:
+    """Overflow menu button with a glyph child — same rationale as the heart."""
+    btn = Gtk.MenuButton()
+    label = Gtk.Label(label="⋮")
+    label.add_css_class("riff-heart")
+    btn.set_child(label)
+    btn.add_css_class("flat")
+    btn.set_valign(Gtk.Align.CENTER)
+    btn.set_tooltip_text(tooltip)
+    return btn
+
+
 def _ellipsized(text: str, css: list[str] | None = None, align_start: bool = True) -> Gtk.Label:
     label = Gtk.Label(label=text)
     label.set_ellipsize(Pango.EllipsizeMode.END)
@@ -159,20 +198,11 @@ class TrackRow(Gtk.ListBoxRow):
             dur.add_css_class("numeric")
             box.append(dur)
 
-        self._fav_btn = Gtk.Button.new_from_icon_name("emblem-favorite-symbolic")
-        self._fav_btn.add_css_class("flat")
-        self._fav_btn.set_valign(Gtk.Align.CENTER)
-        self._fav_btn.set_tooltip_text("Favorite")
-        if window.library.is_favorite(track.video_id):
-            self._fav_btn.add_css_class("accent")
+        self._fav_btn = heart_button(window.library.is_favorite(track.video_id))
         self._fav_btn.connect("clicked", lambda *_: self._toggle_favorite())
         box.append(self._fav_btn)
 
-        menu_btn = Gtk.MenuButton()
-        menu_btn.set_icon_name("view-more-symbolic")
-        menu_btn.add_css_class("flat")
-        menu_btn.set_valign(Gtk.Align.CENTER)
-        menu_btn.set_tooltip_text("More actions")
+        menu_btn = menu_dots_button()
         menu, group = build_track_menu(window, track,
                                        on_favorite=self._toggle_favorite)
         menu_btn.set_menu_model(menu)
@@ -183,10 +213,7 @@ class TrackRow(Gtk.ListBoxRow):
 
     def _toggle_favorite(self) -> None:
         added = self._window.library.toggle_favorite(self.track)
-        if added:
-            self._fav_btn.add_css_class("accent")
-        else:
-            self._fav_btn.remove_css_class("accent")
+        set_heart_state(self._fav_btn, added)
         self._window.toast("Added to favorites" if added else "Removed from favorites")
 
 

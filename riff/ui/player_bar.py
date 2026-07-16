@@ -8,7 +8,14 @@ from .. import config
 from ..core.models import format_duration
 from ..core.player import STATE_LOADING, STATE_PLAYING
 from ..core.queue import REPEAT_ALL, REPEAT_ONE
-from .widgets import CoverArt, _ellipsized, build_track_menu
+from .widgets import (
+    CoverArt,
+    _ellipsized,
+    build_track_menu,
+    heart_button,
+    menu_dots_button,
+    set_heart_state,
+)
 
 
 class PlayerBar(Gtk.Box):
@@ -63,21 +70,14 @@ class PlayerBar(Gtk.Box):
         text.append(self.title_label)
         text.append(self.artist_label)
         now.append(text)
-        self.fav_button = Gtk.Button.new_from_icon_name("emblem-favorite-symbolic")
-        self.fav_button.add_css_class("flat")
-        self.fav_button.set_valign(Gtk.Align.CENTER)
-        self.fav_button.set_tooltip_text("Add to favorites")
+        self.fav_button = heart_button(tooltip="Add to favorites")
         self.fav_button.connect("clicked", self._on_favorite)
         now.append(self.fav_button)
 
         # Full song menu for whatever is playing right now — favoriting,
         # playlists, download, radio must never depend on finding the song
         # in a list somewhere.
-        self.track_menu_btn = Gtk.MenuButton()
-        self.track_menu_btn.set_icon_name("view-more-symbolic")
-        self.track_menu_btn.add_css_class("flat")
-        self.track_menu_btn.set_valign(Gtk.Align.CENTER)
-        self.track_menu_btn.set_tooltip_text("Song actions")
+        self.track_menu_btn = menu_dots_button(tooltip="Song actions")
         self.track_menu_btn.set_sensitive(False)
         now.append(self.track_menu_btn)
         row.set_start_widget(now)
@@ -238,7 +238,4 @@ class PlayerBar(Gtk.Box):
     def _update_fav_icon(self) -> None:
         track = self.service.current_track
         is_fav = track is not None and self.window.library.is_favorite(track.video_id)
-        if is_fav:
-            self.fav_button.add_css_class("accent")
-        else:
-            self.fav_button.remove_css_class("accent")
+        set_heart_state(self.fav_button, is_fav)
