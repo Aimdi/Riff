@@ -136,10 +136,34 @@ class MainWindow(Adw.ApplicationWindow):
         content_box.append(header)
         content_box.append(self.nav)
 
-        # sidebar -----------------------------------------------------------
+        # sidebar (collapsible into a Spotify-style icon rail) ----------------
+        self._sidebar_collapsed = bool(
+            config.settings.get("sidebar_collapsed", False))
+
+        header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
+        self._app_title = Gtk.Label(label="♫ Riff")
+        self._app_title.add_css_class("title-2")
+        self._app_title.set_hexpand(True)
+        self._app_title.set_margin_start(12)
+        self._app_title.set_xalign(0.0)
+        header_row.append(self._app_title)
+        self._collapse_btn = Gtk.Button()
+        self._collapse_btn.add_css_class("flat")
+        self._collapse_btn.set_tooltip_text("Collapse sidebar")
+        self._collapse_label = Gtk.Label(label="«")
+        self._collapse_label.add_css_class("riff-heart")
+        self._collapse_btn.set_child(self._collapse_label)
+        self._collapse_btn.connect(
+            "clicked", lambda *_: self._toggle_sidebar())
+        header_row.append(self._collapse_btn)
+        header_row.set_margin_top(10)
+        header_row.set_margin_bottom(6)
+        header_row.set_margin_end(4)
+
         self.sidebar_list = Gtk.ListBox()
         self.sidebar_list.add_css_class("navigation-sidebar")
         self.sidebar_list.connect("row-activated", self._on_sidebar)
+        self._nav_rows = []
         for name, label, icon in SIDEBAR_ITEMS:
             row = Gtk.ListBoxRow()
             row.item_name = name
@@ -148,33 +172,30 @@ class MainWindow(Adw.ApplicationWindow):
             box.set_margin_bottom(8)
             box.set_margin_start(8)
             box.append(Gtk.Image.new_from_icon_name(icon))
-            box.append(Gtk.Label(label=label))
+            text = Gtk.Label(label=label)
+            box.append(text)
             row.set_child(box)
+            self._nav_rows.append((row, box, text, label))
             self.sidebar_list.append(row)
 
         sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        app_title = Gtk.Label(label="♫ Riff")
-        app_title.add_css_class("title-2")
-        app_title.set_margin_top(16)
-        app_title.set_margin_bottom(10)
-        sidebar_box.append(app_title)
+        sidebar_box.append(header_row)
         sidebar_box.append(self.sidebar_list)
 
-        # playlists section, YT-Music style ---------------------------------
+        # playlists section ---------------------------------------------------
         sidebar_box.append(Gtk.Separator(margin_top=10, margin_bottom=4))
-        new_pl = Gtk.Button()
-        new_pl_label = Gtk.Label(label="＋  New playlist")
-        new_pl.set_child(new_pl_label)
-        new_pl.add_css_class("pill")
-        new_pl.set_margin_start(10)
-        new_pl.set_margin_end(10)
-        new_pl.set_margin_top(6)
-        new_pl.set_margin_bottom(4)
-        new_pl.connect("clicked", lambda *_: self.prompt_text(
+        self._new_pl = Gtk.Button()
+        self._new_pl_label = Gtk.Label(label="＋  New playlist")
+        self._new_pl.set_child(self._new_pl_label)
+        self._new_pl.add_css_class("pill")
+        self._new_pl.set_margin_top(6)
+        self._new_pl.set_margin_bottom(4)
+        self._new_pl.set_tooltip_text("New playlist")
+        self._new_pl.connect("clicked", lambda *_: self.prompt_text(
             "New Playlist", "Name",
             lambda name: (self.library.create_playlist(name),
                           self.reload_sidebar_playlists())))
-        sidebar_box.append(new_pl)
+        sidebar_box.append(self._new_pl)
 
         self.playlist_list = Gtk.ListBox()
         self.playlist_list.add_css_class("navigation-sidebar")
@@ -187,11 +208,11 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_scroll.set_vexpand(True)
         sidebar_scroll.set_child(sidebar_box)
 
-        split = Adw.OverlaySplitView()
+        self._nav_split = Adw.OverlaySplitView()
+        split = self._nav_split
         split.set_sidebar(sidebar_scroll)
         split.set_content(content_box)
-        split.set_min_sidebar_width(200)
-        split.set_max_sidebar_width(220)
+        self._apply_sidebar_mode()
 
         # queue flap on the right --------------------------------------------
         self.queue_panel = QueuePanel(self)
@@ -282,12 +303,60 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- sidebar playlists -------------------------------------------------------
 
+    def _toggle_sidebar(self) -> None:
+        self._sidebar_collapsed = not self._sidebar_collapsed
+        config.settings.set("sidebar_collapsed", self._sidebar_collapsed)
+        self._apply_sidebar_mode()
+        self.reload_sidebar_playlists()
+
+    def _apply_sidebar_mode(self) -> None:
+        collapsed = self._sidebar_collapsed
+        if collapsed:
+            self._nav_split.set_min_sidebar_width(84)
+            self._nav_split.set_max_sidebar_width(84)
+        else:
+            self._nav_split.set_min_sidebar_width(210)
+            self._nav_split.set_max_sidebar_width(230)
+        self._app_title.set_visible(not collapsed)
+        self._collapse_label.set_label("»" if collapsed else "«")
+        self._collapse_btn.set_tooltip_text(
+            "Expand sidebar" if collapsed else "Collapse sidebar")
+        if collapsed:
+            self._collapse_btn.set_halign(Gtk.Align.CENTER)
+            self._collapse_btn.set_hexpand(True)
+        else:
+            self._collapse_btn.set_halign(Gtk.Align.END)
+            self._collapse_btn.set_hexpand(False)
+        for row, box, text, label in self._nav_rows:
+            text.set_visible(not collapsed)
+            box.set_halign(Gtk.Align.CENTER if collapsed else Gtk.Align.FILL)
+            box.set_margin_start(0 if collapsed else 8)
+            row.set_tooltip_text(label if collapsed else None)
+        # new-playlist button: Spotify-style round "+" when collapsed
+        self._new_pl_label.set_label("＋" if collapsed else "＋  New playlist")
+        if collapsed:
+            self._new_pl.remove_css_class("pill")
+            self._new_pl.add_css_class("circular")
+            self._new_pl.set_halign(Gtk.Align.CENTER)
+            self._new_pl.set_margin_start(0)
+            self._new_pl.set_margin_end(0)
+        else:
+            self._new_pl.remove_css_class("circular")
+            self._new_pl.add_css_class("pill")
+            self._new_pl.set_halign(Gtk.Align.FILL)
+            self._new_pl.set_margin_start(10)
+            self._new_pl.set_margin_end(10)
+
     def reload_sidebar_playlists(self) -> None:
         """Fill the sidebar with local playlists plus, when an account is
         connected, the account's own playlists (incl. Liked Music)."""
 
         def work():
-            local = self.library.playlists()
+            local = []
+            for pid, name, count in self.library.playlists():
+                tracks = self.library.playlist_tracks(pid)
+                cover = tracks[0].thumbnail if tracks else ""
+                local.append((pid, name, count, cover))
             try:
                 remote = self.api.library_playlists()
             except Exception:  # noqa: BLE001 — sidebar must never fail hard
@@ -297,28 +366,50 @@ class MainWindow(Adw.ApplicationWindow):
         def present(data) -> None:
             local, remote = data
             self.playlist_list.remove_all()
-            for pid, name, count in local:
+            for pid, name, count, cover in local:
                 plural = "song" if count == 1 else "songs"
                 self._add_playlist_row(
-                    name, f"{count} {plural} · local", "local", (pid, name))
+                    name, f"{count} {plural} · local", "local", (pid, name),
+                    cover)
             for pl in remote:
                 self._add_playlist_row(
                     pl.title, pl.author or "YouTube Music", "remote",
-                    pl.playlist_id)
+                    pl.playlist_id, pl.thumbnail)
 
         run_async(work, present, lambda _e: None, name="riff-sidebar-pl")
 
     def _add_playlist_row(self, title: str, subtitle: str,
-                          kind: str, ref) -> None:
+                          kind: str, ref, cover: str = "") -> None:
         from gi.repository import Pango
+
+        from .widgets import CoverArt
 
         row = Gtk.ListBoxRow()
         row.kind = kind
         row.ref = ref
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        box.set_margin_top(5)
-        box.set_margin_bottom(5)
-        box.set_margin_start(8)
+
+        if self._sidebar_collapsed:
+            # Spotify-style rail: just the cover tile, name in the tooltip.
+            art = CoverArt(52, icon="view-list-symbolic")
+            art.set_url(cover)
+            art.set_margin_top(4)
+            art.set_margin_bottom(4)
+            art.set_halign(Gtk.Align.CENTER)
+            row.set_child(art)
+            row.set_tooltip_text(f"{title}\n{subtitle}")
+            self.playlist_list.append(row)
+            return
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        box.set_margin_start(6)
+        art = CoverArt(38, icon="view-list-symbolic")
+        art.set_url(cover)
+        art.set_valign(Gtk.Align.CENTER)
+        box.append(art)
+        text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_box.set_valign(Gtk.Align.CENTER)
         t = Gtk.Label(label=title)
         t.set_xalign(0.0)
         t.set_ellipsize(Pango.EllipsizeMode.END)
@@ -328,8 +419,9 @@ class MainWindow(Adw.ApplicationWindow):
         s.set_ellipsize(Pango.EllipsizeMode.END)
         s.add_css_class("dim-label")
         s.add_css_class("caption")
-        box.append(t)
-        box.append(s)
+        text_box.append(t)
+        text_box.append(s)
+        box.append(text_box)
         row.set_child(box)
         self.playlist_list.append(row)
 

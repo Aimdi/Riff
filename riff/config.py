@@ -38,6 +38,7 @@ DEFAULTS = {
     "ai_mix_last_refresh": "",
     "listenbrainz_token": "",
     "local_music_dir": "~/Music",
+    "sidebar_collapsed": False,
     "window_width": 1100,
     "window_height": 720,
 }
