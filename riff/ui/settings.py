@@ -110,6 +110,35 @@ class SettingsDialog(Adw.PreferencesDialog):
         scrobble.add(lb_row)
         page.add(scrobble)
 
+        # -- Spotify import (optional Web API) ---------------------------------
+        spotify = Adw.PreferencesGroup()
+        spotify.set_title("Spotify import")
+        spotify.set_description(
+            "“Import from Spotify” works out of the box (no account). "
+            "Optionally add your own free Spotify developer app — create "
+            "one at developer.spotify.com/dashboard — to import playlists "
+            "longer than ~100 songs completely. Note: Spotify blocks its "
+            "own editorial playlists for new API apps; Riff automatically "
+            "falls back to the keyless method for those.")
+
+        sp_id = Adw.EntryRow()
+        sp_id.set_title("Spotify Client ID")
+        sp_id.set_text(str(config.settings.get("spotify_client_id", "") or ""))
+        sp_id.set_show_apply_button(True)
+        sp_id.connect("apply", lambda row: self._save(
+            "spotify_client_id", row.get_text()))
+        spotify.add(sp_id)
+
+        sp_secret = Adw.PasswordEntryRow()
+        sp_secret.set_title("Spotify Client Secret")
+        sp_secret.set_text(
+            str(config.settings.get("spotify_client_secret", "") or ""))
+        sp_secret.set_show_apply_button(True)
+        sp_secret.connect("apply", lambda row: self._save(
+            "spotify_client_secret", row.get_text()))
+        spotify.add(sp_secret)
+        page.add(spotify)
+
         # -- Discord Rich Presence -------------------------------------------
         discord = Adw.PreferencesGroup()
         discord.set_title("Discord Rich Presence")

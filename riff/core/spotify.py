@@ -139,6 +139,114 @@ def fetch(kind: str, item_id: str) -> SpotifyList:
     return parse_embed_html(html, kind)
 
 
+# -- Spotify Web API (optional, user-provided credentials) --------------------
+#
+# The embed pages need nothing but cap the track list (~100 songs) — and
+# they are the ONLY anonymous way at Spotify-owned editorial playlists,
+# which the Web API denies to apps created after Nov 2024. With a free
+# developer app (client credentials flow) the API pages through complete
+# playlists and is the more stable interface for user-created content.
+
+_TOKEN_URL = "https://accounts.spotify.com/api/token"
+_API_BASE = "https://api.spotify.com/v1"
+
+_token_cache: dict = {}
+
+
+def _http_json(url: str, *, headers: dict | None = None,
+               data: bytes | None = None) -> dict:
+    req = urllib.request.Request(url, data=data,
+                                 headers={"User-Agent": _UA,
+                                          **(headers or {})})
+    with urllib.request.urlopen(req, timeout=25) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def api_token(client_id: str, client_secret: str,
+              token_url: str = _TOKEN_URL) -> str:
+    """Client-credentials token, cached until shortly before expiry."""
+    import base64
+    import time
+
+    key = (client_id, token_url)
+    hit = _token_cache.get(key)
+    if hit and hit[1] > time.monotonic() + 30:
+        return hit[0]
+    basic = base64.b64encode(
+        f"{client_id}:{client_secret}".encode()).decode()
+    payload = _http_json(
+        token_url,
+        headers={"Authorization": f"Basic {basic}",
+                 "Content-Type": "application/x-www-form-urlencoded"},
+        data=b"grant_type=client_credentials")
+    token = str(payload.get("access_token") or "")
+    if not token:
+        raise RuntimeError("Spotify returned no access token — check the "
+                           "Client ID and Secret in Settings")
+    _token_cache[key] = (token, time.monotonic()
+                         + float(payload.get("expires_in") or 3600))
+    return token
+
+
+def _api_track(item: dict) -> SpotifyTrack | None:
+    """Normalize one API track object (playlist item or album track)."""
+    t = item.get("track") if "track" in item else item
+    if not isinstance(t, dict):
+        return None
+    title = str(t.get("name") or "").strip()
+    if not title:
+        return None
+    artists = ", ".join(
+        str(a.get("name") or "") for a in t.get("artists") or [])
+    duration = int(t.get("duration_ms") or 0) // 1000
+    return SpotifyTrack(title=title, artists=artists, duration=duration)
+
+
+def fetch_api(kind: str, item_id: str, client_id: str, client_secret: str,
+              token_url: str = _TOKEN_URL,
+              api_base: str = _API_BASE) -> SpotifyList:
+    """Fetch a complete playlist/album through the Web API (with paging)."""
+    token = api_token(client_id, client_secret, token_url)
+    auth = {"Authorization": f"Bearer {token}"}
+
+    head = _http_json(f"{api_base}/{kind}s/{item_id}", headers=auth)
+    name = str(head.get("name") or "Spotify import")
+    owner = head.get("owner") or {}
+    subtitle = str(owner.get("display_name")
+                   or ", ".join(str(a.get("name") or "")
+                                for a in head.get("artists") or []))
+
+    tracks: list[SpotifyTrack] = []
+    page = head.get("tracks") or {}
+    while True:
+        for item in page.get("items") or []:
+            track = _api_track(item)
+            if track is not None:
+                tracks.append(track)
+        nxt = page.get("next")
+        if not nxt:
+            break
+        page = _http_json(nxt, headers=auth)
+    if not tracks:
+        raise RuntimeError("Spotify returned no songs for this link")
+    return SpotifyList(name=name, kind=kind, subtitle=subtitle,
+                       tracks=tracks)
+
+
+def fetch_best(kind: str, item_id: str, client_id: str = "",
+               client_secret: str = "") -> SpotifyList:
+    """API first when credentials are configured (complete track lists),
+    embed page as the universal fallback — editorial playlists are often
+    API-blocked for new apps but always render as embeds."""
+    if client_id and client_secret:
+        try:
+            return fetch_api(kind, item_id, client_id, client_secret)
+        except Exception:  # noqa: BLE001
+            log.warning("Spotify API fetch failed; falling back to embed",
+                        exc_info=True)
+    return fetch(kind, item_id)
+
+
 # -- YouTube Music matching ---------------------------------------------------
 
 def _similarity(a: str, b: str) -> float:

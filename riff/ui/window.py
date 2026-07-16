@@ -1723,7 +1723,10 @@ class MainWindow(Adw.ApplicationWindow):
             GLib.idle_add(lambda: (status_label.set_label(text), False)[1])
 
         def work():
-            sp = spotify.fetch(kind, item_id)
+            sp = spotify.fetch_best(
+                kind, item_id,
+                str(config.settings.get("spotify_client_id", "") or ""),
+                str(config.settings.get("spotify_client_secret", "") or ""))
             set_status(f"“{sp.name}” — matching {len(sp.tracks)} songs "
                        "on YouTube Music…")
 

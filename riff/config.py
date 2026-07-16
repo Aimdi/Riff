@@ -39,6 +39,8 @@ DEFAULTS = {
     "ai_mix_auto_refresh": True,  # seamless Home “For you” + daily AI Mix
     "ai_mix_last_refresh": "",
     "listenbrainz_token": "",
+    "spotify_client_id": "",      # optional Web API credentials
+    "spotify_client_secret": "",  # (embed scraping works without them)
     "discord_rpc_enabled": False,
     "discord_client_id": "",  # Discord developer application id
     "local_music_dir": "~/Music",

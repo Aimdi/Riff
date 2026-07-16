@@ -120,3 +120,130 @@ def test_match_survives_search_exceptions():
         BoomApi(), [SpotifyTrack("A", "B", 100)])
     assert matched == []
     assert len(missed) == 1
+
+
+# -- Web API backend -----------------------------------------------------
+
+
+class FakeSpotifyApi:
+    """Local HTTP stand-in for accounts.spotify.com + api.spotify.com."""
+
+    def __init__(self):
+        import http.server
+        import threading
+
+        outer = self
+        self.requests = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def _send(self, payload, code=200):
+                body = json.dumps(payload).encode()
+                self.send_response(code)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def do_POST(self):
+                outer.requests.append(
+                    ("POST", self.path, self.headers.get("Authorization")))
+                self._send({"access_token": "tok123", "expires_in": 3600})
+
+            def do_GET(self):
+                outer.requests.append(
+                    ("GET", self.path, self.headers.get("Authorization")))
+                if self.path.startswith("/v1/playlists/PL1"):
+                    self._send({
+                        "name": "Mega List",
+                        "owner": {"display_name": "Tester"},
+                        "tracks": {
+                            "items": [{"track": {
+                                "name": "First", "duration_ms": 200000,
+                                "artists": [{"name": "A1"}]}}],
+                            "next": f"{outer.base}/v1/page2",
+                        },
+                    })
+                elif self.path == "/v1/page2":
+                    self._send({
+                        "items": [{"track": {
+                            "name": "Second", "duration_ms": 100000,
+                            "artists": [{"name": "A2"}, {"name": "A3"}]}}],
+                        "next": None,
+                    })
+                else:
+                    self._send({"error": "not found"}, 404)
+
+            def log_message(self, *a):
+                pass
+
+        import http.server as hs
+        self.httpd = hs.HTTPServer(("127.0.0.1", 0), Handler)
+        self.base = f"http://127.0.0.1:{self.httpd.server_address[1]}"
+        threading.Thread(target=self.httpd.serve_forever,
+                         daemon=True).start()
+
+    def close(self):
+        self.httpd.shutdown()
+        self.httpd.server_close()
+
+
+def test_fetch_api_pages_through_full_playlist():
+    from riff.core import spotify as sp_mod
+
+    fake = FakeSpotifyApi()
+    try:
+        sp_mod._token_cache.clear()
+        result = sp_mod.fetch_api(
+            "playlist", "PL1", "cid", "secret",
+            token_url=f"{fake.base}/api/token",
+            api_base=f"{fake.base}/v1")
+        assert result.name == "Mega List"
+        assert [t.title for t in result.tracks] == ["First", "Second"]
+        assert result.tracks[1].artists == "A2, A3"
+        assert result.tracks[0].duration == 200
+        # token request used Basic auth; API calls used the Bearer token
+        assert fake.requests[0][0] == "POST"
+        assert fake.requests[0][2].startswith("Basic ")
+        assert all(r[2] == "Bearer tok123"
+                   for r in fake.requests[1:])
+        # token is cached: a second fetch must not re-request it
+        n_posts = sum(1 for r in fake.requests if r[0] == "POST")
+        sp_mod.fetch_api("playlist", "PL1", "cid", "secret",
+                         token_url=f"{fake.base}/api/token",
+                         api_base=f"{fake.base}/v1")
+        assert sum(1 for r in fake.requests if r[0] == "POST") == n_posts
+    finally:
+        fake.close()
+
+
+def test_fetch_best_falls_back_to_embed(monkeypatch):
+    from riff.core import spotify as sp_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("api blocked (editorial playlist)")
+
+    embed = SpotifyTrack("From Embed", "X", 100)
+    monkeypatch.setattr(sp_mod, "fetch_api", boom)
+    monkeypatch.setattr(
+        sp_mod, "fetch",
+        lambda kind, item_id: sp_mod.SpotifyList(
+            name="Embedded", kind=kind, tracks=[embed]))
+    result = sp_mod.fetch_best("playlist", "X1", "cid", "secret")
+    assert result.name == "Embedded"
+
+
+def test_fetch_best_without_credentials_uses_embed(monkeypatch):
+    from riff.core import spotify as sp_mod
+
+    called = []
+    monkeypatch.setattr(
+        sp_mod, "fetch_api",
+        lambda *a, **k: called.append("api"))
+    monkeypatch.setattr(
+        sp_mod, "fetch",
+        lambda kind, item_id: sp_mod.SpotifyList(
+            name="E", kind=kind,
+            tracks=[SpotifyTrack("T", "A", 1)]))
+    result = sp_mod.fetch_best("playlist", "X1", "", "")
+    assert result.name == "E"
+    assert called == []

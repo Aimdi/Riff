@@ -42,7 +42,10 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
 - 💚 **Spotify playlist import** — menu → *Import from Spotify…*: paste any
   public Spotify playlist/album link (or pick a classic like Today's Top
   Hits) and Riff matches the songs on YouTube Music — no Spotify account
-  needed; re-import any time to pull updates
+  needed; re-import any time to pull updates. Optionally add your own free
+  Spotify API credentials in Settings to import very long playlists
+  completely (Riff auto-falls back to the keyless method when the API
+  refuses, e.g. for Spotify's own editorial playlists)
 - 🏠 **Spotify-style Home** — time-of-day greeting, a shortcut grid
   (Liked Songs, AI Mix, your playlists) and hover-to-play buttons on
   every album/playlist card

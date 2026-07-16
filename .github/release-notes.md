@@ -1,6 +1,6 @@
-## Riff 0.16.0 🎵
+## Riff 0.17.0 🎵
 
-**Now Playing panel + real crossfade.** The ♪ button (or Alt+Shift+N) opens a Spotify-style right panel: big artwork, clickable song/artist links, a heart, and Up Next — it shares the flap with the queue, one always swaps for the other. And under Settings → Playback there's now **Crossfade (0–12 s)**: Riff runs a second mpv deck and blends the end of the current song into the start of the next with an equal-power volume curve, just like Spotify. Crossfade kicks in whenever the next song is prefetched (which Riff already does constantly).
+**Spotify Web API support (optional).** Spotify import now has two backends: paste your own free developer credentials (Settings → Spotify import; create an app at developer.spotify.com/dashboard) and Riff uses the official Web API with full paging — complete imports of playlists with hundreds of songs. No credentials? Everything keeps working through the keyless embed method. Riff also auto-falls back to it when the API refuses a playlist (Spotify blocks its own editorial lists like Today's Top Hits for new API apps — the keyless method still gets them).
 
 ### What’s new since 0.8.0
 
