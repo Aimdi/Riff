@@ -67,16 +67,16 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
 # python-ytmusicapi is in the AUR; CachyOS ships paru out of the box
 paru -S python-ytmusicapi
 
-git clone https://github.com/aimdi/player.git
-cd player/packaging
+git clone https://github.com/Aimdi/Riff.git
+cd Riff/packaging
 makepkg -si
 ```
 
 ### Option B — install script (no makepkg)
 
 ```bash
-git clone https://github.com/aimdi/player.git
-cd player
+git clone https://github.com/Aimdi/Riff.git
+cd Riff
 ./install.sh
 ```
 
@@ -108,8 +108,8 @@ or virtualenv). `riff-update --force` rebuilds even when up to date.
 sudo pacman -S python-gobject gtk4 libadwaita mpv yt-dlp   # CachyOS/Arch
 pip install --user ytmusicapi yt-dlp
 
-git clone https://github.com/aimdi/player.git
-cd player
+git clone https://github.com/Aimdi/Riff.git
+cd Riff
 python -m riff
 ```
 

@@ -1773,7 +1773,7 @@ class MainWindow(Adw.ApplicationWindow):
         about.set_application_icon("io.github.aimdi.Riff")
         about.set_version(__version__)
         about.set_comments("A native YouTube Music player for Linux")
-        about.set_website("https://github.com/aimdi/player")
+        about.set_website("https://github.com/Aimdi/Riff")
         about.set_license_type(Gtk.License.GPL_3_0)
         about.present(self)
 

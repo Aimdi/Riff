@@ -8,11 +8,11 @@
 # the preinstalled AUR helper:   paru -S python-ytmusicapi
 
 pkgname=riff-player
-pkgver=0.18.0
+pkgver=0.18.1
 pkgrel=1
 pkgdesc="Native YouTube Music player (GTK4 + libadwaita + mpv)"
 arch=('any')
-url="https://github.com/aimdi/player"
+url="https://github.com/Aimdi/Riff"
 license=('GPL-3.0-or-later')
 depends=(
   'python'

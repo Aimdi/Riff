@@ -7,7 +7,7 @@
 # install.sh virtualenv.
 set -euo pipefail
 
-REPO="${RIFF_UPDATE_REPO:-https://github.com/aimdi/player.git}"
+REPO="${RIFF_UPDATE_REPO:-https://github.com/Aimdi/Riff.git}"
 SRC="${RIFF_UPDATE_SRC:-${XDG_CACHE_HOME:-$HOME/.cache}/riff/update-src}"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1

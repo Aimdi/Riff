@@ -1,6 +1,6 @@
-## Riff 0.18.0 🎵
+## Riff 0.18.1 🎵
 
-**Discover — recommendations without surveillance.** New ✨ sidebar page: “Because you liked …” sections seeded by random picks from your favorites/most-played, plus popular songs you've never played from your #1 artist. Everything is computed from your local library (dislikes filtered, songs you already know excluded) using anonymous per-song lookups — your taste profile never leaves your machine. Hit “Surprise me again” for a fresh roll. Artist pages also gained a “Fans also like” carousel of related artists.
+**Maintenance: repo rename.** The GitHub repository is now Aimdi/Riff — riff-update, the About dialog, packaging and all docs now point at the new address directly instead of relying on GitHub's redirect from the old aimdi/player name (that redirect can vanish, which would have silently broken updates). Existing installs update normally one last time through the redirect; after this update you're on the new URL for good.
 
 ### What’s new since 0.8.0
 

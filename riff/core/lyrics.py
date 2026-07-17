@@ -45,7 +45,7 @@ def parse_lrc(text: str) -> list[tuple[float, str]]:
 
 def _get(url: str):
     req = urllib.request.Request(
-        url, headers={"User-Agent": "Riff music player (github.com/aimdi/player)"}
+        url, headers={"User-Agent": "Riff music player (github.com/Aimdi/Riff)"}
     )
     with urllib.request.urlopen(req, timeout=15) as resp:
         return json.load(resp)

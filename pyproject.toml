@@ -24,7 +24,7 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/aimdi/player"
+Homepage = "https://github.com/Aimdi/Riff"
 
 [project.scripts]
 riff = "riff.app:main"
