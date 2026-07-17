@@ -1,6 +1,6 @@
-## Riff 0.21.0 🎵
+## Riff 0.21.1 🎵
 
-**Discovery redesign, phases 1–2: Riff now learns.** A local taste model logs every listen, skip (with how much you heard), like, playlist add and follow — decayed over time, stored only on your machine. Radio autoplay is post-processed against it: no song repeats in a session or within 7 days, max 2 tracks per artist per batch, artists you keep skipping fade out, and a new Familiar ↔ Adventurous exploration slider (Settings → Playback) steers it. Song-level discovery: every song menu gains “Similar Songs” (~25 related tracks with an unheard-only filter) and “More Like This, Play Next” (5 similar songs slipped in after the current one), and the Now Playing panel shows similar songs for whatever is playing — tap to play next, ＋ to queue. Phases 3–4 (Daily Mixes, Fresh Finds, Release Radar, Discover page) come next.
+**Hardening & project hygiene.** Groundwork modules for keyring-backed secret storage (libsecret with a locked-down file fallback), a circuit breaker for the fragile YouTube APIs, a versioned DB-migration framework and diagnostics helpers — plus CI workflows (tests + weekly yt-dlp/ytmusicapi bump PRs), a Makefile, pre-commit hooks, SECURITY.md and CONTRIBUTING.md. No behavior changes yet: the new modules are scaffolding that upcoming releases wire in.
 
 ### What’s new since 0.8.0
 
