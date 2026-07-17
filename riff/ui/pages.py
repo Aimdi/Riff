@@ -480,10 +480,16 @@ class BrowsePage(Gtk.Box):
             "toggled", lambda b: b.get_active() and self._show("discover"))
         self._explore_btn.connect(
             "toggled", lambda b: b.get_active() and self._show("explore"))
+        # Don't load anything during construction — the first visit
+        # (SearchPage.focus/refresh) triggers the initial lazy load.
+        self._ready = False
         self._discover_btn.set_active(True)
+        self._ready = True
 
     def _show(self, name: str) -> None:
         self._stack.set_visible_child_name(name)
+        if not self._ready:
+            return
         page = self.discover if name == "discover" else self.explore
         page.refresh()
 
@@ -535,17 +541,35 @@ class SearchPage(ContentPage):
             self._filter_buttons[key] = btn
             filter_box.append(btn)
         controls.append(filter_box)
+        self._filter_box = filter_box
+        self._filter_box.set_visible(False)
         self.append(controls)
 
+        # Spotify-mobile style: an empty search shows Browse (Discover +
+        # Charts & Moods); results replace it as soon as you search.
         self._results_area = ContentPage(window)
         self._results_area.set_vexpand(True)
-        self.append(self._results_area)
-        self._results_area.show_widget(status_page(
-            "system-search-symbolic", "Search YouTube Music",
-            "Find songs, albums, artists and playlists."))
+        self.browse = BrowsePage(window)
+        self._mode_stack = Gtk.Stack()
+        self._mode_stack.set_vexpand(True)
+        self._mode_stack.set_transition_type(
+            Gtk.StackTransitionType.CROSSFADE)
+        self._mode_stack.add_named(self.browse, "browse")
+        self._mode_stack.add_named(self._results_area, "results")
+        self.append(self._mode_stack)
 
     def focus(self) -> None:
         self.entry.grab_focus()
+        if self._mode_stack.get_visible_child_name() == "browse":
+            self.browse.refresh()
+
+    def refresh(self) -> None:
+        if self._mode_stack.get_visible_child_name() == "browse":
+            self.browse.refresh()
+
+    def _show_mode(self, mode: str) -> None:
+        self._mode_stack.set_visible_child_name(mode)
+        self._filter_box.set_visible(mode == "results")
 
     def _on_filter(self, button: Gtk.ToggleButton, key: str) -> None:
         if button.get_active():
@@ -557,6 +581,12 @@ class SearchPage(ContentPage):
         # Only auto-search once the user pauses; GTK already debounces
         # search-changed (~150 ms). Require a few chars to avoid noise.
         text = entry.get_text().strip()
+        if not text:
+            # cleared -> back to Browse, like Spotify's search tab
+            self._query = ""
+            self._search_seq += 1  # invalidate in-flight results
+            self._show_mode("browse")
+            return
         if len(text) >= 3 and text != self._query:
             self._query = text
             self._run_search()
@@ -567,6 +597,7 @@ class SearchPage(ContentPage):
             self._run_search()
 
     def _run_search(self) -> None:
+        self._show_mode("results")
         query, kind = self._query, self._kind
         self._search_seq += 1
         seq = self._search_seq

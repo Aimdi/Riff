@@ -1,6 +1,6 @@
-## Riff 0.19.0 🎵
+## Riff 0.20.0 🎵
 
-**Discover and Explore are now one.** The sidebar has a single ✨ Explore entry with a switcher on top: **Discover** (your personal, privacy-preserving recommendations) and **Charts & Moods** (public charts and genre/mood playlists). Each view still loads lazily and independently — less sidebar clutter, same content.
+**Browse lives under Search now — like Spotify mobile.** The sidebar is down to one discovery entry: open Search and, while the box is empty, you get the Browse view with the Discover / Charts & Moods switcher. Start typing and results take over (with the Songs/Albums/Artists/Playlists filters); clear the box and Browse comes right back. Also fixes Browse loading eagerly at startup — it now waits until you actually open it.
 
 ### What’s new since 0.8.0
 

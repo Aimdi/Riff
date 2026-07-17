@@ -10,10 +10,10 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
 
 ## Features
 
-- 🔍 **Search** songs, albums, artists and playlists on YouTube Music
+- 🔍 **Search** songs, albums, artists and playlists on YouTube Music —
+  and while the box is empty it doubles as Browse (like Spotify mobile):
+  personal **Discover** picks and public **Charts & Moods**
 - 🏠 **Home feed** with charts, moods and personalized-style recommendations
-- 🧭 **Explore** — one page, two views: personal **Discover**
-  recommendations and public **Charts & Moods**
 - 📻 **Radio / autoplay** — when your queue runs out, related songs keep playing
 - 🗒️ **Full queue control** — play next, add to queue, drag to reorder, shuffle,
   repeat (off / all / one)
@@ -54,7 +54,7 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
   the ♪ button) with big artwork, album/artist links and Up Next
 - 🎚️ **Crossfade** — blend songs into each other (0–12 s, Settings →
   Playback), powered by a second mpv deck with an equal-power curve
-- ✨ **Discover** (inside Explore) — privacy-preserving recommendations:
+- ✨ **Discover** (inside Search) — privacy-preserving recommendations:
   “Because you liked …” sections and unheard songs from your top artist,
   built from your *local* history via anonymous per-song lookups; plus
   “Fans also like” on every artist page
@@ -125,7 +125,7 @@ python -m riff
 | Create a playlist | Sidebar → *Playlists* → **New Playlist** |
 | Add a song to a playlist | ⋮ menu on the song → *Add to Playlist…* |
 | Download for offline | ⋮ menu → *Download* |
-| Discover new music | Sidebar → *Explore* → *Discover* (personal) or *Charts & Moods* (public) |
+| Discover new music | Sidebar → *Search* (empty box) → *Discover* (personal) or *Charts & Moods* (public) |
 | Follow an artist | Open the artist page → **Follow** |
 | Reorder the queue | Drag a queue row onto another |
 | Lyrics (synced) | Header menu → *Lyrics*; click a line to seek |
