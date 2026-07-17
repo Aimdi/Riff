@@ -1,0 +1,19 @@
+# Reproducible Riff dev environment (Arch base — matches CachyOS target).
+# Build:  podman build -t riff-dev -f packaging/dev/Containerfile .
+# Run:    podman run --rm -it -v "$PWD":/src -w /src riff-dev
+#         make check && make run   # run needs a display; use host X/Wayland
+
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm \
+    python python-pip python-gobject gtk4 libadwaita mpv \
+    yt-dlp git base-devel cairo pkgconf gobject-introspection \
+    libsecret \
+    && pacman -Scc --noconfirm
+
+# uv for lockfile-based installs
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:${PATH}"
+
+WORKDIR /src
+CMD ["bash"]
