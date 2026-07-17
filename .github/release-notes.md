@@ -1,6 +1,6 @@
-## Riff 0.18.1 🎵
+## Riff 0.19.0 🎵
 
-**Maintenance: repo rename.** The GitHub repository is now Aimdi/Riff — riff-update, the About dialog, packaging and all docs now point at the new address directly instead of relying on GitHub's redirect from the old aimdi/player name (that redirect can vanish, which would have silently broken updates). Existing installs update normally one last time through the redirect; after this update you're on the new URL for good.
+**Discover and Explore are now one.** The sidebar has a single ✨ Explore entry with a switcher on top: **Discover** (your personal, privacy-preserving recommendations) and **Charts & Moods** (public charts and genre/mood playlists). Each view still loads lazily and independently — less sidebar clutter, same content.
 
 ### What’s new since 0.8.0
 

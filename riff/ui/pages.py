@@ -443,6 +443,58 @@ class DiscoverPage(ContentPage):
         self.show_widget(scroll_wrap(box))
 
 
+class BrowsePage(Gtk.Box):
+    """Explore + Discover merged behind one sidebar entry.
+
+    A pill switcher picks between the personal Discover view (local-taste
+    recommendations) and the public Charts & Moods view; each keeps its own
+    lazy loading and only refreshes when shown.
+    """
+
+    def __init__(self, window):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
+        self.window = window
+        self.discover = DiscoverPage(window)
+        self.explore = ExplorePage(window)
+
+        switcher = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        switcher.set_halign(Gtk.Align.CENTER)
+        switcher.set_margin_top(12)
+        self._discover_btn = Gtk.ToggleButton.new_with_label("Discover")
+        self._discover_btn.add_css_class("pill")
+        self._explore_btn = Gtk.ToggleButton.new_with_label("Charts & Moods")
+        self._explore_btn.add_css_class("pill")
+        self._explore_btn.set_group(self._discover_btn)
+        switcher.append(self._discover_btn)
+        switcher.append(self._explore_btn)
+        self.append(switcher)
+
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stack.set_vexpand(True)
+        self._stack.add_named(self.discover, "discover")
+        self._stack.add_named(self.explore, "explore")
+        self.append(self._stack)
+
+        self._discover_btn.connect(
+            "toggled", lambda b: b.get_active() and self._show("discover"))
+        self._explore_btn.connect(
+            "toggled", lambda b: b.get_active() and self._show("explore"))
+        self._discover_btn.set_active(True)
+
+    def _show(self, name: str) -> None:
+        self._stack.set_visible_child_name(name)
+        page = self.discover if name == "discover" else self.explore
+        page.refresh()
+
+    def show_view(self, name: str) -> None:
+        (self._discover_btn if name == "discover"
+         else self._explore_btn).set_active(True)
+
+    def refresh(self) -> None:
+        self._show(self._stack.get_visible_child_name() or "discover")
+
+
 class SearchPage(ContentPage):
     FILTERS = [
         ("songs", "Songs"),
