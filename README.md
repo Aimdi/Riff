@@ -58,6 +58,13 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
   “Because you liked …” sections and unheard songs from your top artist,
   built from your *local* history via anonymous per-song lookups; plus
   “Fans also like” on every artist page
+- 🧠 **Local taste model** — Riff learns from listens, skips, likes and
+  playlist adds (with time decay), entirely on your machine; radio is
+  post-processed against it (artist caps, no repeats, skip-rate penalties)
+  with a Familiar ↔ Adventurous exploration slider in Settings
+- 🎯 **Song-level discovery** — every song menu has *Similar Songs* (browse
+  ~25 related tracks, optional unheard-only) and *More Like This, Play
+  Next*; the Now Playing panel shows similar songs for the current track
 - 🚫 No ads, no tracking, no Google account required
 
 ## Install on CachyOS / Arch

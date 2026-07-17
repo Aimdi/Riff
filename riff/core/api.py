@@ -371,6 +371,30 @@ class MusicApi:
             tracks.append(track)
         return tracks
 
+    def related_songs(self, video_id: str) -> list[Track]:
+        """Songs similar to one song via the watch page's related feed
+        (get_song_related). Falls back to radio when the feed is empty —
+        callers get *some* similarity signal either way."""
+        tracks: list[Track] = []
+        try:
+            watch = self.yt.get_watch_playlist(videoId=video_id, limit=1)
+            browse = watch.get("related")
+            if browse:
+                for section in self.yt.get_song_related(browse) or []:
+                    for item in section.get("contents") or []:
+                        if not item.get("videoId") \
+                                or item["videoId"] == video_id:
+                            continue
+                        try:
+                            tracks.append(Track.from_yt(item))
+                        except Exception:  # noqa: BLE001
+                            continue
+        except Exception:  # noqa: BLE001
+            log.debug("related feed failed for %s", video_id, exc_info=True)
+        if not tracks:
+            tracks = self.radio(video_id)
+        return tracks
+
     def lyrics(self, video_id: str) -> str:
         try:
             watch = self.yt.get_watch_playlist(videoId=video_id, limit=1)

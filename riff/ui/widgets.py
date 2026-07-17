@@ -172,6 +172,8 @@ def build_track_menu(window, track: Track, on_favorite=None):
     sec1.append("Play Next", "trk.play-next")
     sec1.append("Add to Queue", "trk.add-queue")
     sec1.append("Start Radio", "trk.radio")
+    sec1.append("Similar Songs", "trk.similar")
+    sec1.append("More Like This, Play Next", "trk.more-like")
     menu.append_section(None, sec1)
 
     sec2 = Gio.Menu()
@@ -220,6 +222,8 @@ def build_track_menu(window, track: Track, on_favorite=None):
         "add-queue": lambda: (window.service.add_to_queue([track]),
                               window.toast("Added to queue")),
         "radio": lambda: window.service.play_track_with_radio(track),
+        "similar": lambda: window.show_similar_songs(track),
+        "more-like": lambda: window.play_similar_next(track),
         "favorite": on_favorite or default_favorite,
         "dislike": toggle_dislike,
         "add-playlist": lambda: window.choose_playlist_for(track),

@@ -22,6 +22,7 @@ from .player import (
     PlayerEngine,
 )
 from .queue import PlayQueue
+from .discovery import DiscoveryEngine
 from .stream import StreamResolver
 from .video_gst import GstVideoPlayer, gst_video_available
 
@@ -43,6 +44,7 @@ class PlaybackService:
             quality=config.settings.get("audio_quality", "high")
         )
         self.queue = PlayQueue()
+        self.discovery = DiscoveryEngine(library, api)
 
         # observers: lists of callables
         self.track_listeners: list = []      # fn(track | None)
@@ -56,6 +58,10 @@ class PlaybackService:
 
         self._play_token = 0  # invalidates in-flight resolutions
         self._radio_pending = False
+        # taste model: where each queued track came from + what's playing
+        self._track_sources: dict[str, str] = {}
+        self._playing_track = None
+        self._last_completed: str | None = None
         self._scrobbled_current = False
         self.video_mode = False
         self._video: GstVideoPlayer | None = None
@@ -98,14 +104,23 @@ class PlaybackService:
         # Audio (mpv) is the source of truth for transport state.
         return self.engine.state
 
-    def play_tracks(self, tracks: list[Track], start: int = 0) -> None:
+    def play_tracks(self, tracks: list[Track], start: int = 0,
+                    source: str = "user_click") -> None:
         """Replace the queue and start playing."""
         playable = [t for t in tracks if t.video_id or t.local_path]
         if not playable:
             return
         self._maybe_scrobble()
+        self._tag_sources(playable, source)
         self.queue.set_tracks(playable, start=start)
         self._start_current()
+
+    def _tag_sources(self, tracks, source: str) -> None:
+        if len(self._track_sources) > 3000:
+            self._track_sources.clear()
+        for t in tracks:
+            if t.video_id:
+                self._track_sources.setdefault(t.video_id, source)
 
     def play_track_with_radio(self, track: Track) -> None:
         """Play one track and asynchronously extend the queue with its radio."""
@@ -201,13 +216,16 @@ class PlaybackService:
             if pos > 2 and not enabled:
                 self.engine.seek(pos)
 
-    def add_next(self, tracks: list[Track]) -> None:
+    def add_next(self, tracks: list[Track], source: str = "queue") -> None:
+        self._tag_sources(tracks, source)
         self.queue.add_next(tracks)
 
-    def add_to_queue(self, tracks: list[Track]) -> None:
+    def add_to_queue(self, tracks: list[Track], source: str = "queue") -> None:
+        self._tag_sources(tracks, source)
         self.queue.add_end(tracks)
 
     def shutdown(self) -> None:
+        self._log_play_transition(natural=False)
         self._play_token += 1
         self._cancel_fade()
         self._stop_video_backend()
@@ -290,6 +308,7 @@ class PlaybackService:
         return spare
 
     def _begin_crossfade(self, uri: str, fade: float) -> None:
+        self._log_play_transition(natural=True)
         self._maybe_scrobble()
         old = self._engine
         target = int(config.settings.get("volume", 100))
@@ -312,6 +331,7 @@ class PlaybackService:
             pass  # repeat-off tail handled by normal end when fade finishes
         track = self.queue.current
         if track is not None:
+            self._playing_track = track
             self._emit(self.track_listeners, track)
             self._after_start(track)
 
@@ -388,10 +408,37 @@ class PlaybackService:
                 self.error_listeners, f"Video: {msg}")
         return self._video
 
+    def _log_play_transition(self, natural: bool = False) -> None:
+        """Record how much of the outgoing track was heard (taste model)."""
+        track, self._playing_track = self._playing_track, None
+        if track is None or not track.video_id:
+            return
+        duration = float(self.engine.duration or track.duration or 0)
+        position = float(self.engine.position or 0)
+        if natural:
+            fraction: float | None = 1.0
+        elif duration > 0:
+            fraction = max(0.0, min(1.0, position / duration))
+        else:
+            fraction = None
+        source = self._track_sources.get(track.video_id, "queue")
+        run_async(lambda: self.library.log_event(
+            track, "play", source=source, listened_fraction=fraction),
+            name="riff-taste")
+        # same-session co-occurrence for meaningful listens
+        if fraction is None or fraction >= 0.30:
+            prev = self._last_completed
+            if prev and prev != track.video_id:
+                run_async(lambda: self.library.add_cooccurrence(
+                    prev, track.video_id), name="riff-cooc")
+            self._last_completed = track.video_id
+
     def _start_current(self) -> None:
         track = self.queue.current
         if track is None:
             return
+        self._log_play_transition(natural=False)
+        self._playing_track = track
         self._cancel_fade()
         self._play_token += 1
         self._scrobbled_current = False
@@ -512,6 +559,8 @@ class PlaybackService:
             # Only extend if the seed is still what's playing.
             cur = self.queue.current
             if cur and cur.video_id == seed.video_id and tracks:
+                tracks = self._smart_radio(seed, tracks)
+                self._tag_sources(tracks, "radio")
                 self.queue.add_end(tracks)
                 self._prefetch_next()
             elif not tracks:
@@ -526,6 +575,7 @@ class PlaybackService:
         run_async(fetch, done, error, name="riff-radio")
 
     def _on_track_ended(self) -> None:
+        self._log_play_transition(natural=True)
         self._maybe_scrobble()
         nxt = self.queue.next(manual=False)
         if nxt is not None:
@@ -544,11 +594,12 @@ class PlaybackService:
 
         def done(tracks: list[Track]) -> None:
             known = {t.video_id for t in self.queue.tracks}
-            fresh = [t for t in self._without_dislikes(tracks)
+            fresh = [t for t in self._smart_radio(last, tracks)
                      if t.video_id not in known]
             if not fresh:
                 self._emit(self.state_listeners, STATE_STOPPED)
                 return
+            self._tag_sources(fresh, "radio")
             self.queue.add_end(fresh)
             if self.queue.next(manual=False):
                 self._start_current()
@@ -560,6 +611,18 @@ class PlaybackService:
             self._emit(self.state_listeners, STATE_STOPPED)
 
         run_async(fetch, done, error, name="riff-radio-continue")
+
+    def _smart_radio(self, seed: Track, tracks: list[Track]) -> list[Track]:
+        """Post-process raw radio through the discovery pipeline (dedupe
+        vs session + last 7 days, artist caps, skip-rate penalties).
+        Falls back to plain dislike-filtering if the engine chokes."""
+        try:
+            out = self.discovery.smart_radio_batch(
+                seed, tracks, history_window=self.queue.tracks)
+            return out if out else self._without_dislikes(tracks)
+        except Exception:  # noqa: BLE001 — autoplay must never die
+            log.exception("smart radio post-processing failed")
+            return self._without_dislikes(tracks)
 
     def _without_dislikes(self, tracks: list[Track]) -> list[Track]:
         try:

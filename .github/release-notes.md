@@ -1,6 +1,6 @@
-## Riff 0.20.0 🎵
+## Riff 0.21.0 🎵
 
-**Browse lives under Search now — like Spotify mobile.** The sidebar is down to one discovery entry: open Search and, while the box is empty, you get the Browse view with the Discover / Charts & Moods switcher. Start typing and results take over (with the Songs/Albums/Artists/Playlists filters); clear the box and Browse comes right back. Also fixes Browse loading eagerly at startup — it now waits until you actually open it.
+**Discovery redesign, phases 1–2: Riff now learns.** A local taste model logs every listen, skip (with how much you heard), like, playlist add and follow — decayed over time, stored only on your machine. Radio autoplay is post-processed against it: no song repeats in a session or within 7 days, max 2 tracks per artist per batch, artists you keep skipping fade out, and a new Familiar ↔ Adventurous exploration slider (Settings → Playback) steers it. Song-level discovery: every song menu gains “Similar Songs” (~25 related tracks with an unheard-only filter) and “More Like This, Play Next” (5 similar songs slipped in after the current one), and the Now Playing panel shows similar songs for whatever is playing — tap to play next, ＋ to queue. Phases 3–4 (Daily Mixes, Fresh Finds, Release Radar, Discover page) come next.
 
 ### What’s new since 0.8.0
 

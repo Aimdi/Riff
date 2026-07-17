@@ -78,6 +78,26 @@ class SettingsDialog(Adw.PreferencesDialog):
                 "crossfade", int(row.get_value())))
         playback.add(crossfade)
 
+        explore = Adw.ActionRow()
+        explore.set_title("Exploration")
+        explore.set_subtitle(
+            "Radio & discovery taste: Familiar ↔ Adventurous")
+        scale = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 5)
+        scale.set_size_request(180, -1)
+        scale.set_draw_value(False)
+        try:
+            scale.set_value(
+                float(config.settings.get("exploration", 0.3)) * 100)
+        except (TypeError, ValueError):
+            scale.set_value(30)
+        scale.connect(
+            "value-changed",
+            lambda sc: config.settings.set(
+                "exploration", round(sc.get_value() / 100, 2)))
+        explore.add_suffix(scale)
+        playback.add(explore)
+
         radio = Adw.SwitchRow()
         radio.set_title("Radio autoplay")
         radio.set_subtitle("Keep playing similar songs when the queue ends")

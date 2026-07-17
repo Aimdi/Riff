@@ -13,6 +13,10 @@ import time
 
 from .models import Track
 
+import logging
+
+log = logging.getLogger("riff.library")
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS favorites (
     video_id TEXT PRIMARY KEY,
@@ -65,6 +69,45 @@ CREATE TABLE IF NOT EXISTS dislikes (
     video_id TEXT PRIMARY KEY,
     track_json TEXT NOT NULL,
     added_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS listen_events (
+    id INTEGER PRIMARY KEY,
+    video_id TEXT NOT NULL,
+    artist_key TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    source TEXT NOT NULL,
+    listened_fraction REAL,
+    event TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_events_artist_ts ON listen_events(artist_key, ts);
+CREATE INDEX IF NOT EXISTS idx_events_video_ts  ON listen_events(video_id, ts);
+CREATE TABLE IF NOT EXISTS artist_affinity (
+    artist_key TEXT PRIMARY KEY,
+    score REAL NOT NULL,
+    updated_ts INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS track_cooccurrence (
+    a TEXT NOT NULL, b TEXT NOT NULL,
+    weight REAL NOT NULL,
+    updated_ts INTEGER NOT NULL,
+    PRIMARY KEY (a, b)
+);
+CREATE TABLE IF NOT EXISTS impressions (
+    video_id TEXT NOT NULL,
+    surface TEXT NOT NULL,
+    ts INTEGER NOT NULL,
+    PRIMARY KEY (video_id, surface, ts)
+);
+CREATE TABLE IF NOT EXISTS api_cache (
+    cache_key TEXT PRIMARY KEY,
+    payload TEXT NOT NULL,
+    expires_ts INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS system_mixes (
+    mix_id TEXT PRIMARY KEY,
+    title TEXT, reason TEXT,
+    payload TEXT NOT NULL,
+    generated_ts INTEGER NOT NULL
 );
 """
 
@@ -162,8 +205,10 @@ class Library:
         """Returns the new favorite state."""
         if self.is_favorite(track.video_id):
             self.remove_favorite(track.video_id)
+            self.log_event(track, "unfavorite")
             return False
         self.add_favorite(track)
+        self.log_event(track, "favorite")
         return True
 
     # -- history -------------------------------------------------------------
@@ -448,6 +493,7 @@ class Library:
                 "VALUES (?,?,?,?)",
                 (playlist_id, row[0] + 1, track.video_id, json.dumps(track.to_dict())),
             )
+        self.log_event(track, "playlist_add")
 
     def remove_from_playlist(self, playlist_id: int, position: int) -> None:
         with self._lock, self._db:
@@ -469,6 +515,7 @@ class Library:
                 "INSERT OR REPLACE INTO dislikes (video_id, track_json, added_at) "
                 "VALUES (?,?,?)",
                 (track.video_id, json.dumps(track.to_dict()), time.time()))
+        self.log_event(track, "never_play")
 
     def remove_dislike(self, video_id: str) -> None:
         with self._lock, self._db:
@@ -495,6 +542,176 @@ class Library:
         return [Track.from_dict(json.loads(r[0])) for r in rows]
 
     # -- stats ---------------------------------------------------------------
+
+# -- taste model (spec: local discovery engine) ----------------------------
+
+    def log_event(self, track: Track, event: str, *, source: str = "",
+                  listened_fraction: float | None = None,
+                  ts: float | None = None) -> None:
+        """Append one taste event. Never raises — the model is best-effort
+        and must not disturb playback."""
+        from . import taste
+
+        try:
+            key = taste.artist_key((track.artists or [""])[0])
+            with self._lock, self._db:
+                self._db.execute(
+                    "INSERT INTO listen_events (video_id, artist_key, ts, "
+                    "source, listened_fraction, event) VALUES (?,?,?,?,?,?)",
+                    (track.video_id, key, int(ts or time.time()),
+                     source or "unknown", listened_fraction, event))
+                # affinity cache is now stale for this artist
+                self._db.execute(
+                    "DELETE FROM artist_affinity WHERE artist_key = ?",
+                    (key,))
+        except Exception:  # noqa: BLE001
+            log.exception("taste event logging failed")
+
+    def events_for_artist(self, artist_key: str, limit: int = 2000):
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT event, listened_fraction, source, ts FROM "
+                "listen_events WHERE artist_key = ? ORDER BY ts DESC LIMIT ?",
+                (artist_key, limit)).fetchall()
+        return rows
+
+    def artist_affinity(self, artist_key: str,
+                        now: float | None = None) -> float:
+        """Decayed affinity, cached for an hour per artist."""
+        from . import taste
+
+        now = now or time.time()
+        with self._lock:
+            row = self._db.execute(
+                "SELECT score, updated_ts FROM artist_affinity "
+                "WHERE artist_key = ?", (artist_key,)).fetchone()
+        if row and now - row[1] < 3600:
+            return row[0]
+        score = taste.score_events(self.events_for_artist(artist_key), now)
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO artist_affinity VALUES (?,?,?)",
+                (artist_key, score, int(now)))
+        return score
+
+    def artist_skip_rate(self, artist_key: str) -> float:
+        from . import taste
+
+        return taste.skip_rate(self.events_for_artist(artist_key, 200))
+
+    def top_artist_keys(self, limit: int = 40) -> list[str]:
+        """Artists by (undecayed) event volume — cheap shortlist; callers
+        re-rank the shortlist by artist_affinity()."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT artist_key, COUNT(*) c FROM listen_events "
+                "WHERE artist_key != '' GROUP BY artist_key "
+                "ORDER BY c DESC LIMIT ?", (limit,)).fetchall()
+        return [r[0] for r in rows]
+
+    def log_impressions(self, video_ids, surface: str,
+                        ts: float | None = None) -> None:
+        ts = int(ts or time.time())
+        try:
+            with self._lock, self._db:
+                self._db.executemany(
+                    "INSERT OR IGNORE INTO impressions VALUES (?,?,?)",
+                    [(v, surface, ts) for v in video_ids if v])
+        except Exception:  # noqa: BLE001
+            log.exception("impression logging failed")
+
+    def recent_impressions(self, days: float = 14,
+                           surface: str | None = None) -> set[str]:
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            if surface:
+                rows = self._db.execute(
+                    "SELECT DISTINCT video_id FROM impressions "
+                    "WHERE ts > ? AND surface = ?", (cutoff, surface))
+            else:
+                rows = self._db.execute(
+                    "SELECT DISTINCT video_id FROM impressions WHERE ts > ?",
+                    (cutoff,))
+            return {r[0] for r in rows.fetchall()}
+
+    def recently_played_ids(self, days: float = 7) -> set[str]:
+        cutoff = time.time() - days * 86400
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT DISTINCT video_id FROM listen_events "
+                "WHERE ts > ? AND event IN ('play','skip')",
+                (cutoff,)).fetchall()
+        played = {r[0] for r in rows}
+        # history table covers plays from before the event log existed
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT DISTINCT video_id FROM history WHERE played_at > ?",
+                (cutoff,)).fetchall()
+        return played | {r[0] for r in rows}
+
+    def add_cooccurrence(self, a: str, b: str, weight: float = 1.0) -> None:
+        if not a or not b or a == b:
+            return
+        if b < a:
+            a, b = b, a
+        try:
+            with self._lock, self._db:
+                self._db.execute(
+                    "INSERT INTO track_cooccurrence VALUES (?,?,?,?) "
+                    "ON CONFLICT(a, b) DO UPDATE SET "
+                    "weight = weight + excluded.weight, "
+                    "updated_ts = excluded.updated_ts",
+                    (a, b, weight, int(time.time())))
+        except Exception:  # noqa: BLE001
+            log.exception("cooccurrence update failed")
+
+    def cooccurring(self, video_id: str, limit: int = 25) -> list[tuple[str, float]]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT CASE WHEN a = ? THEN b ELSE a END, weight "
+                "FROM track_cooccurrence WHERE a = ? OR b = ? "
+                "ORDER BY weight DESC LIMIT ?",
+                (video_id, video_id, video_id, limit)).fetchall()
+        return [(r[0], r[1]) for r in rows]
+
+    def track_by_id(self, video_id: str) -> Track | None:
+        """Best-effort Track lookup from anything we've stored locally."""
+        for query in (
+            "SELECT track_json FROM history WHERE video_id = ? "
+            "ORDER BY played_at DESC LIMIT 1",
+            "SELECT track_json FROM favorites WHERE video_id = ? LIMIT 1",
+            "SELECT track_json FROM playlist_items WHERE video_id = ? LIMIT 1",
+        ):
+            with self._lock:
+                row = self._db.execute(query, (video_id,)).fetchone()
+            if row:
+                try:
+                    return Track.from_dict(json.loads(row[0]))
+                except (ValueError, KeyError):
+                    continue
+        return None
+
+    def cache_get(self, key: str):
+        with self._lock:
+            row = self._db.execute(
+                "SELECT payload, expires_ts FROM api_cache "
+                "WHERE cache_key = ?", (key,)).fetchone()
+        if not row or row[1] < time.time():
+            return None
+        try:
+            return json.loads(row[0])
+        except ValueError:
+            return None
+
+    def cache_put(self, key: str, payload, ttl_seconds: float) -> None:
+        try:
+            with self._lock, self._db:
+                self._db.execute(
+                    "INSERT OR REPLACE INTO api_cache VALUES (?,?,?)",
+                    (key, json.dumps(payload),
+                     int(time.time() + ttl_seconds)))
+        except Exception:  # noqa: BLE001
+            log.exception("api cache write failed")
 
     def stats_overview(self) -> dict:
         with self._lock:
@@ -551,6 +768,19 @@ class Library:
                 "VALUES (?,?,?,?)",
                 (browse_id, name, thumbnail, time.time()),
             )
+        try:
+            from . import taste
+            with self._lock, self._db:
+                self._db.execute(
+                    "INSERT INTO listen_events (video_id, artist_key, ts, "
+                    "source, listened_fraction, event) VALUES (?,?,?,?,?,?)",
+                    ("", taste.artist_key(name), int(time.time()),
+                     "user_click", None, "follow"))
+                self._db.execute(
+                    "DELETE FROM artist_affinity WHERE artist_key = ?",
+                    (taste.artist_key(name),))
+        except Exception:  # noqa: BLE001
+            log.exception("follow event logging failed")
 
     def unfollow_artist(self, browse_id: str) -> None:
         with self._lock, self._db:
@@ -581,6 +811,7 @@ class Library:
                 "VALUES (?,?,?,?)",
                 (track.video_id, json.dumps(track.to_dict()), path, time.time()),
             )
+        self.log_event(track, "download")
 
     def remove_download(self, video_id: str) -> None:
         with self._lock, self._db:

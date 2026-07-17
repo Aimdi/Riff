@@ -1759,6 +1759,107 @@ class MainWindow(Adw.ApplicationWindow):
 
         run_async(work, done, fail, name="riff-spotify-import")
 
+    # -- song-level discovery (spec §3.4) -------------------------------------
+
+    def show_similar_songs(self, seed) -> None:
+        """Dialog listing ~25 songs similar to the seed, with an
+        unheard-only toggle — playable and queueable without touching the
+        current queue."""
+        from .widgets import TrackList
+
+        dialog = Adw.Dialog.new()
+        dialog.set_title(f"Similar to “{seed.title}”")
+        dialog.set_content_width(560)
+        dialog.set_content_height(640)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        box.append(Adw.HeaderBar())
+
+        controls = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        controls.set_margin_start(16)
+        controls.set_margin_end(16)
+        play_all = Gtk.Button.new_with_label("Play all")
+        play_all.add_css_class("suggested-action")
+        play_all.add_css_class("pill")
+        controls.append(play_all)
+        unheard = Gtk.ToggleButton.new_with_label("Unheard only")
+        unheard.add_css_class("pill")
+        controls.append(unheard)
+        box.append(controls)
+
+        holder = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        holder.set_vexpand(True)
+        spinner = Gtk.Spinner()
+        spinner.set_size_request(28, 28)
+        spinner.set_halign(Gtk.Align.CENTER)
+        spinner.set_margin_top(30)
+        spinner.start()
+        holder.append(spinner)
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_child(holder)
+        box.append(scroll)
+        dialog.set_child(box)
+        dialog.present(self)
+
+        state = {"tracks": []}
+
+        def load(unheard_only: bool) -> None:
+            def work():
+                return self.service.discovery.similar_songs(
+                    seed, limit=25, unheard_only=unheard_only)
+
+            def done(tracks) -> None:
+                state["tracks"] = tracks
+                child = holder.get_first_child()
+                while child is not None:
+                    holder.remove(child)
+                    child = holder.get_first_child()
+                if not tracks:
+                    empty = Gtk.Label(label=(
+                        "Nothing similar found"
+                        + (" that you haven't heard" if unheard_only
+                           else "") + " — try again later."))
+                    empty.add_css_class("dim-label")
+                    empty.set_margin_top(30)
+                    holder.append(empty)
+                    return
+                tl = TrackList(self, radio_on_single=True)
+                tl.set_tracks(tracks)
+                holder.append(tl)
+
+            def fail(exc: Exception) -> None:
+                done([])
+                self.toast(f"Similar songs failed: {exc}")
+
+            run_async(work, done, fail, name="riff-similar")
+
+        play_all.connect(
+            "clicked",
+            lambda *_: state["tracks"] and self.service.play_tracks(
+                list(state["tracks"]), source="discover_section"))
+        unheard.connect(
+            "toggled", lambda b: load(b.get_active()))
+        load(False)
+
+    def play_similar_next(self, seed) -> None:
+        """Silently insert 5 similar songs after the current track —
+        exploration without queue destruction."""
+
+        def work():
+            return self.service.discovery.similar_songs(seed, limit=5)
+
+        def done(tracks) -> None:
+            if not tracks:
+                self.toast("No similar songs found")
+                return
+            self.service.add_next(tracks, source="discover_section")
+            self.toast(f"{len(tracks)} similar songs playing next")
+
+        run_async(work, done,
+                  lambda exc: self.toast(f"Similar songs failed: {exc}"),
+                  name="riff-similar-next")
+
     def show_about(self) -> None:
         from .. import __version__
 

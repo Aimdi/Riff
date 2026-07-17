@@ -112,3 +112,40 @@ def test_track_end_without_fade_still_advances(monkeypatch):
     svc.play_tracks(tracks(2))
     engine.end_current_track()
     assert svc.queue.current.video_id == "v1"
+
+
+def test_play_and_skip_feed_the_taste_model(monkeypatch):
+    """Phase-1 acceptance: affinity reflects listens and skips, with the
+    right source attribution."""
+    from riff.core import taste
+
+    svc, engine, _spare = make_fading_service(monkeypatch, fade=0.0)
+    ts = tracks(3)
+    for i, t in enumerate(ts):
+        t.artists = [f"Artist {i}"]
+
+    svc.play_tracks(ts)  # source defaults to user_click
+    # listen most of track 0, then natural end
+    engine.duration = 100.0
+    engine.position = 99.0
+    engine.end_current_track()
+    # quick-skip track 1
+    engine.position = 3.0
+    svc.next()
+    rows = svc.library.events_for_artist(taste.artist_key("Artist 0"))
+    assert [r[0] for r in rows] == ["play"]
+    assert rows[0][1] == 1.0  # natural end -> full listen
+    assert rows[0][2] == "user_click"
+    rows1 = svc.library.events_for_artist(taste.artist_key("Artist 1"))
+    assert rows1[0][1] is not None and rows1[0][1] < 0.1
+    assert svc.library.artist_affinity(taste.artist_key("Artist 0")) > 0
+    assert svc.library.artist_affinity(taste.artist_key("Artist 1")) < 0
+
+
+def test_radio_added_tracks_are_source_tagged(monkeypatch):
+    svc, engine, _spare = make_fading_service(monkeypatch, fade=0.0)
+    svc.play_tracks(tracks(1))
+    svc._tag_sources(tracks(3)[1:], "radio")
+    assert svc._track_sources["v1"] == "radio"
+    # first-seen source wins (v0 was user_click)
+    assert svc._track_sources["v0"] == "user_click"
