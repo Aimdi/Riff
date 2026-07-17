@@ -1,6 +1,6 @@
-## Riff 0.21.1 🎵
+## Riff 0.22.1 🎵
 
-**Hardening & project hygiene.** Groundwork modules for keyring-backed secret storage (libsecret with a locked-down file fallback), a circuit breaker for the fragile YouTube APIs, a versioned DB-migration framework and diagnostics helpers — plus CI workflows (tests + weekly yt-dlp/ytmusicapi bump PRs), a Makefile, pre-commit hooks, SECURITY.md and CONTRIBUTING.md. No behavior changes yet: the new modules are scaffolding that upcoming releases wire in.
+**Shell & UX overhaul.** Adaptive window shell (ToolbarView + breakpoints) that reflows on narrow windows; Explore promoted back to a top-level sidebar page; the queue and lyrics now live inside the Now Playing panel (one right-side home for everything about the current song); Home gains an AI Mix surface and “Jump back in”; richer Search and Stats; and destructive actions get toast Undo buttons.
 
 ### What’s new since 0.8.0
 
