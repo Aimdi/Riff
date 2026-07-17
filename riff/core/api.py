@@ -234,6 +234,15 @@ class MusicApi:
                 )
             return out
 
+        related = []
+        for r in (data.get("related") or {}).get("results") or []:
+            if r.get("browseId"):
+                related.append(Artist(
+                    browse_id=r["browseId"],
+                    name=r.get("title") or "",
+                    thumbnail=_best_thumbnail(r.get("thumbnails")),
+                ))
+
         return Artist(
             browse_id=channel_id,
             name=data.get("name") or "",
@@ -242,6 +251,7 @@ class MusicApi:
             songs=songs,
             albums=parse_albums("albums"),
             singles=parse_albums("singles"),
+            related=related,
         )
 
     def playlist(self, playlist_id: str) -> Playlist:

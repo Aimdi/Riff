@@ -1,6 +1,6 @@
-## Riff 0.17.0 🎵
+## Riff 0.18.0 🎵
 
-**Spotify Web API support (optional).** Spotify import now has two backends: paste your own free developer credentials (Settings → Spotify import; create an app at developer.spotify.com/dashboard) and Riff uses the official Web API with full paging — complete imports of playlists with hundreds of songs. No credentials? Everything keeps working through the keyless embed method. Riff also auto-falls back to it when the API refuses a playlist (Spotify blocks its own editorial lists like Today's Top Hits for new API apps — the keyless method still gets them).
+**Discover — recommendations without surveillance.** New ✨ sidebar page: “Because you liked …” sections seeded by random picks from your favorites/most-played, plus popular songs you've never played from your #1 artist. Everything is computed from your local library (dislikes filtered, songs you already know excluded) using anonymous per-song lookups — your taste profile never leaves your machine. Hit “Surprise me again” for a fresh roll. Artist pages also gained a “Fans also like” carousel of related artists.
 
 ### What’s new since 0.8.0
 

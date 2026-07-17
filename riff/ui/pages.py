@@ -376,6 +376,73 @@ class HomePage(ContentPage):
         run_async(work, done, lambda _e: None, name="riff-follows")
 
 
+class DiscoverPage(ContentPage):
+    """Privacy-preserving discovery: sections seeded from the local
+    library, filled by anonymous per-song lookups."""
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._loaded = False
+
+    def refresh(self, force: bool = False) -> None:
+        if self._loaded and not force:
+            return
+        from ..core import discover
+
+        self.load_async(
+            lambda: discover.build_sections(
+                self.window.library, self.window.api),
+            self._present)
+
+    def _present(self, sections) -> None:
+        self._loaded = True
+        if not sections:
+            self.show_widget(status_page(
+                "emblem-favorite-symbolic", "Nothing to discover from yet",
+                "Play and ♥ a few songs first — Discover is built from "
+                "your local favorites and history. Nothing about your "
+                "taste ever leaves this device."))
+            return
+
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        box.set_margin_top(18)
+        box.set_margin_bottom(120)
+        box.set_margin_start(18)
+        box.set_margin_end(18)
+
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        title = Gtk.Label(label="Discover")
+        title.add_css_class("title-1")
+        title.set_xalign(0.0)
+        title.set_hexpand(True)
+        head.append(title)
+        again = Gtk.Button.new_with_label("Surprise me again")
+        again.add_css_class("pill")
+        again.set_valign(Gtk.Align.CENTER)
+        again.connect("clicked", lambda *_: self.refresh(force=True))
+        head.append(again)
+        box.append(head)
+
+        note = Gtk.Label(label=(
+            "Fresh songs you haven't played, seeded by your local "
+            "favorites — anonymous per-song lookups only."))
+        note.add_css_class("dim-label")
+        note.add_css_class("caption")
+        note.set_xalign(0.0)
+        box.append(note)
+
+        for section_title, tracks in sections:
+            label = Gtk.Label(label=section_title)
+            label.add_css_class("title-3")
+            label.set_xalign(0.0)
+            box.append(label)
+            tl = TrackList(self.window, radio_on_single=True)
+            tl.set_tracks(tracks)
+            box.append(tl)
+
+        self.show_widget(scroll_wrap(box))
+
+
 class SearchPage(ContentPage):
     FILTERS = [
         ("songs", "Songs"),
@@ -737,6 +804,9 @@ class ArtistPage(_DetailPage):
             box.append(Carousel("Albums", artist.albums, self.window))
         if artist.singles:
             box.append(Carousel("Singles & EPs", artist.singles, self.window))
+        if artist.related:
+            box.append(Carousel("Fans also like", artist.related,
+                                self.window))
         self.show_widget(scroll_wrap(_padded(box)))
 
     def _follow_button(self, artist: Artist) -> Gtk.ToggleButton:

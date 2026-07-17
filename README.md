@@ -53,6 +53,10 @@ and [Harmony Music](https://github.com/anandnet/Harmony-Music), built for
   the ♪ button) with big artwork, album/artist links and Up Next
 - 🎚️ **Crossfade** — blend songs into each other (0–12 s, Settings →
   Playback), powered by a second mpv deck with an equal-power curve
+- ✨ **Discover page** — privacy-preserving recommendations: “Because you
+  liked …” sections and unheard songs from your top artist, built from your
+  *local* history via anonymous per-song lookups; plus “Fans also like” on
+  every artist page
 - 🚫 No ads, no tracking, no Google account required
 
 ## Install on CachyOS / Arch

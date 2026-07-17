@@ -15,6 +15,7 @@ from ..core import lyrics as lyrics_mod
 from .pages import (
     AlbumPage,
     ArtistPage,
+    DiscoverPage,
     ExplorePage,
     HomePage,
     LibraryPage,
@@ -153,6 +154,7 @@ AI_MIX_PLAYLIST = "✨ AI Mix"
 SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
     ("explore", "Explore", "web-browser-symbolic"),
+    ("discover", "Discover", "riff-discover-symbolic"),
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
@@ -183,6 +185,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.pages = {
             "home": HomePage(self),
             "explore": ExplorePage(self),
+            "discover": DiscoverPage(self),
             "search": SearchPage(self),
             "favorites": LibraryPage(self, "favorites"),
             "history": LibraryPage(self, "history"),

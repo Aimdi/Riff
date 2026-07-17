@@ -129,6 +129,7 @@ class Artist:
     songs: list[Track] = field(default_factory=list)
     albums: list[Album] = field(default_factory=list)
     singles: list[Album] = field(default_factory=list)
+    related: list["Artist"] = field(default_factory=list)
 
 
 @dataclass
