@@ -11,10 +11,10 @@ log = logging.getLogger("riff.window")
 from .. import APP_NAME, config
 from ..core.models import Track
 from ..util import run_async
-from ..core import lyrics as lyrics_mod
 from .pages import (
     AlbumPage,
     ArtistPage,
+    BrowsePage,
     HomePage,
     LibraryPage,
     LocalFilesPage,
@@ -27,7 +27,6 @@ from .pages import (
 )
 from . import iconutil
 from .player_bar import PlayerBar
-from .queue_panel import QueuePanel
 
 CSS = b"""
 .riff-cover {
@@ -151,6 +150,7 @@ AI_MIX_PLAYLIST = "✨ AI Mix"
 
 SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
+    ("explore", "Explore", "web-browser-symbolic"),
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
@@ -175,11 +175,14 @@ class MainWindow(Adw.ApplicationWindow):
             int(config.settings.get("window_width", 1100)),
             int(config.settings.get("window_height", 720)),
         )
+        # Required when using Adw.Breakpoint (HIG: no implicit min size).
+        self.set_size_request(360, 400)
         self._load_css()
 
         # pages -----------------------------------------------------------
         self.pages = {
             "home": HomePage(self),
+            "explore": BrowsePage(self),
             "search": SearchPage(self),
             "favorites": LibraryPage(self, "favorites"),
             "history": LibraryPage(self, "history"),
@@ -200,21 +203,21 @@ class MainWindow(Adw.ApplicationWindow):
         root_page.set_tag("root")
         self.nav.add(root_page)
 
-        # header bar --------------------------------------------------------
+        # header bar (lives in ToolbarView top — full window width) ----------
         header = Adw.HeaderBar()
         title = Adw.WindowTitle.new(APP_NAME, "")
         header.set_title_widget(title)
+        # App-level actions only; lyrics / AI Mix live on player bar / Home.
         menu = Gio.Menu()
-        menu.append("AI Mix", "win.ai-mix")
         menu.append("Import from Spotify…", "win.spotify-import")
-        menu.append("Lyrics", "win.lyrics")
-        menu.append("Mini Player", "win.mini")
+        menu.append("Generate AI Mix", "win.ai-mix")
         menu.append("Keyboard Shortcuts", "win.shortcuts")
-        menu.append("Settings", "win.settings")
+        menu.append("Preferences", "win.settings")
         menu.append("About Riff", "win.about")
         menu_btn = Gtk.MenuButton()
         menu_btn.set_child(iconutil.image("open-menu-symbolic"))
         menu_btn.set_menu_model(menu)
+        menu_btn.set_tooltip_text("Menu")
         header.pack_end(menu_btn)
 
         # profile avatar (Spotify-style, top right)
@@ -227,13 +230,18 @@ class MainWindow(Adw.ApplicationWindow):
         header.pack_end(avatar_btn)
         self._refresh_avatar()
 
-        content_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        content_box.append(header)
-        content_box.append(self.nav)
+        # Narrow-width: reveal sidebar overlay from the header.
+        self._sidebar_reveal_btn = Gtk.ToggleButton()
+        iconutil.set_button(self._sidebar_reveal_btn, "view-list-symbolic")
+        self._sidebar_reveal_btn.add_css_class("flat")
+        self._sidebar_reveal_btn.set_tooltip_text("Show navigation")
+        self._sidebar_reveal_btn.set_visible(False)
+        header.pack_start(self._sidebar_reveal_btn)
 
         # sidebar (collapsible into a Spotify-style icon rail) ----------------
         self._sidebar_collapsed = bool(
             config.settings.get("sidebar_collapsed", False))
+        self._narrow = False
 
         header_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
         self._app_title = Gtk.Label(label="♫ Riff")
@@ -309,43 +317,58 @@ class MainWindow(Adw.ApplicationWindow):
         sidebar_scroll.set_vexpand(True)
         sidebar_scroll.set_child(sidebar_box)
 
+        # Left nav: OverlaySplitView (collapses to overlay under Breakpoint).
         self._nav_split = Adw.OverlaySplitView()
-        split = self._nav_split
-        split.set_sidebar(sidebar_scroll)
-        split.set_content(content_box)
+        self._nav_split.set_sidebar(sidebar_scroll)
+        self._nav_split.set_content(self.nav)
+        self._nav_split.set_enable_hide_gesture(True)
+        self._nav_split.set_enable_show_gesture(True)
         self._apply_sidebar_mode()
 
-        # right panel: queue / Now Playing share one flap (like Spotify) ----
+        # right panel: single Now Playing surface (Queue + Lyrics tabs) ----
         from .now_playing import NowPlayingPanel
 
-        self.queue_panel = QueuePanel(self)
+        self.now_playing_panel = NowPlayingPanel(self)
         self.queue_split = Adw.OverlaySplitView()
         self.queue_split.set_sidebar_position(Gtk.PackType.END)
-        self.right_stack = Gtk.Stack()
-        self.right_stack.set_transition_type(
-            Gtk.StackTransitionType.CROSSFADE)
-        self.right_stack.add_named(self.queue_panel, "queue")
-        self.queue_split.set_sidebar(self.right_stack)
-        self.queue_split.set_content(split)
+        self.queue_split.set_sidebar(self.now_playing_panel)
+        self.queue_split.set_content(self._nav_split)
         self.queue_split.set_show_sidebar(False)
         self.queue_split.set_min_sidebar_width(300)
-        self.queue_split.set_max_sidebar_width(340)
+        self.queue_split.set_max_sidebar_width(360)
+        self.queue_split.set_enable_hide_gesture(True)
 
         # player bar + toasts (video plays inside the cover-art slot)
         self.player_bar = PlayerBar(self)
-        self.now_playing_panel = NowPlayingPanel(self)
-        self.right_stack.add_named(self.now_playing_panel, "now")
         self._right_sync = False
         self.player_bar.queue_btn.connect("toggled", self._on_queue_toggle)
         self.player_bar.now_btn.connect("toggled", self._on_now_toggle)
 
-        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        outer.append(self.queue_split)
-        outer.append(self.player_bar)
+        # Adw.ToolbarView: header top, player bottom — proper chrome/backdrop.
+        self.toolbar = Adw.ToolbarView()
+        self.toolbar.add_top_bar(header)
+        self.toolbar.set_content(self.queue_split)
+        self.toolbar.add_bottom_bar(self.player_bar)
 
         self.toaster = Adw.ToastOverlay()
-        self.toaster.set_child(outer)
+        self.toaster.set_child(self.toolbar)
         self.set_content(self.toaster)
+
+        # Adaptive: below ~900sp the left nav becomes an overlay flap.
+        try:
+            bp = Adw.Breakpoint.new(
+                Adw.BreakpointCondition.parse("max-width: 900sp"))
+            bp.add_setter(self._nav_split, "collapsed", True)
+            bp.connect("apply", self._on_narrow_apply)
+            bp.connect("unapply", self._on_narrow_unapply)
+            self.add_breakpoint(bp)
+        except Exception:  # noqa: BLE001 — older Adw without Breakpoint API
+            log.warning("Adw.Breakpoint unavailable; shell stays fixed-width")
+
+        self._sidebar_reveal_btn.connect(
+            "toggled", self._on_sidebar_reveal_toggled)
+        self._nav_split.connect(
+            "notify::show-sidebar", self._on_nav_show_sidebar_notify)
 
         self.service.error_listeners.append(self.toast)
         self.service.video_listeners.append(self._on_video_mode)
@@ -396,6 +419,9 @@ class MainWindow(Adw.ApplicationWindow):
             page.focus()
         elif hasattr(page, "refresh"):
             page.refresh()
+        # On narrow overlay, auto-hide drawer after a destination pick.
+        if self._narrow:
+            self._nav_split.set_show_sidebar(False)
 
     def _push(self, widget, title: str) -> None:
         page = Adw.NavigationPage.new(widget, title or APP_NAME)
@@ -421,20 +447,58 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- sidebar playlists -------------------------------------------------------
 
+    def _on_narrow_apply(self, _bp=None) -> None:
+        """Breakpoint: left nav becomes an overlay; show header reveal button."""
+        self._narrow = True
+        self._sidebar_reveal_btn.set_visible(True)
+        self._collapse_btn.set_visible(False)
+        # Full labels in the overlay drawer for usability.
+        self._sidebar_collapsed = False
+        self._apply_sidebar_mode()
+        self._nav_split.set_show_sidebar(False)
+        self._sidebar_reveal_btn.set_active(False)
+
+    def _on_narrow_unapply(self, _bp=None) -> None:
+        self._narrow = False
+        self._sidebar_reveal_btn.set_visible(False)
+        self._collapse_btn.set_visible(True)
+        self._nav_split.set_collapsed(False)
+        self._nav_split.set_show_sidebar(True)
+        self._sidebar_collapsed = bool(
+            config.settings.get("sidebar_collapsed", False))
+        self._apply_sidebar_mode()
+        self.reload_sidebar_playlists()
+
+    def _on_sidebar_reveal_toggled(self, btn: Gtk.ToggleButton) -> None:
+        if self._narrow:
+            self._nav_split.set_show_sidebar(btn.get_active())
+
+    def _on_nav_show_sidebar_notify(self, *_args) -> None:
+        if not self._narrow:
+            return
+        showing = self._nav_split.get_show_sidebar()
+        if self._sidebar_reveal_btn.get_active() != showing:
+            self._sidebar_reveal_btn.set_active(showing)
+
     def _toggle_sidebar(self) -> None:
+        if self._narrow:
+            self._nav_split.set_show_sidebar(
+                not self._nav_split.get_show_sidebar())
+            return
         self._sidebar_collapsed = not self._sidebar_collapsed
         config.settings.set("sidebar_collapsed", self._sidebar_collapsed)
         self._apply_sidebar_mode()
         self.reload_sidebar_playlists()
 
     def _apply_sidebar_mode(self) -> None:
-        collapsed = self._sidebar_collapsed
+        # In narrow overlay mode always use a full-width drawer (not icon rail).
+        collapsed = self._sidebar_collapsed and not self._narrow
         if collapsed:
             self._nav_split.set_min_sidebar_width(84)
             self._nav_split.set_max_sidebar_width(84)
         else:
             self._nav_split.set_min_sidebar_width(210)
-            self._nav_split.set_max_sidebar_width(230)
+            self._nav_split.set_max_sidebar_width(280 if self._narrow else 230)
         self._app_title.set_visible(not collapsed)
         self._collapse_label.set_label("»" if collapsed else "«")
         self._collapse_btn.set_tooltip_text(
@@ -790,32 +854,64 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_playlist(row.ref)
 
     def _on_queue_toggle(self, btn) -> None:
-        self._show_right_panel("queue" if btn.get_active() else None)
+        if btn.get_active():
+            self._open_right_panel(tab="queue")
+        else:
+            self._close_right_panel_if_idle()
 
     def _on_now_toggle(self, btn) -> None:
-        self._show_right_panel("now" if btn.get_active() else None)
+        if btn.get_active():
+            self._open_right_panel(tab="queue")
+        else:
+            self._close_right_panel_if_idle()
 
-    def _show_right_panel(self, which: str | None) -> None:
+    def _open_right_panel(self, tab: str = "queue") -> None:
+        """Show the single Now Playing panel on the given tab."""
         if self._right_sync:
             return
         self._right_sync = True
         try:
+            self.now_playing_panel.show_tab(tab)
+            self.now_playing_panel.refresh()
+            self.queue_split.set_show_sidebar(True)
             bar = self.player_bar
-            if which is None:
-                if not (bar.queue_btn.get_active()
-                        or bar.now_btn.get_active()):
-                    self.queue_split.set_show_sidebar(False)
-            else:
-                (bar.now_btn if which == "queue" else
-                 bar.queue_btn).set_active(False)
-                self.right_stack.set_visible_child_name(which)
-                self.queue_split.set_show_sidebar(True)
+            # Keep toggles reflecting panel open without fighting each other.
+            if tab == "lyrics":
+                if not bar.now_btn.get_active():
+                    bar.now_btn.set_active(True)
+                if not bar.queue_btn.get_active():
+                    bar.queue_btn.set_active(True)
+            elif not bar.now_btn.get_active() and not bar.queue_btn.get_active():
+                bar.now_btn.set_active(True)
         finally:
             self._right_sync = False
 
+    def _close_right_panel_if_idle(self) -> None:
+        if self._right_sync:
+            return
+        bar = self.player_bar
+        if bar.queue_btn.get_active() or bar.now_btn.get_active():
+            return
+        self.queue_split.set_show_sidebar(False)
+
     def toggle_now_playing(self) -> None:
-        btn = self.player_bar.now_btn
-        btn.set_active(not btn.get_active())
+        open_ = not self.queue_split.get_show_sidebar()
+        if open_:
+            self._right_sync = True
+            try:
+                self.player_bar.now_btn.set_active(True)
+                self.player_bar.queue_btn.set_active(True)
+            finally:
+                self._right_sync = False
+            self._open_right_panel(tab="queue")
+        else:
+            self._right_sync = True
+            try:
+                self.player_bar.now_btn.set_active(False)
+                self.player_bar.queue_btn.set_active(False)
+            finally:
+                self._right_sync = False
+            self.queue_split.set_show_sidebar(False)
 
     def set_video_mode(self, enabled: bool) -> None:
         """Play video in the cover-art slot (or restore the thumbnail)."""
@@ -830,8 +926,20 @@ class MainWindow(Adw.ApplicationWindow):
 
     # -- helpers used by widgets ------------------------------------------------
 
-    def toast(self, message: str) -> None:
-        self.toaster.add_toast(Adw.Toast.new(str(message)))
+    def toast(
+        self,
+        message: str,
+        *,
+        action_label: str | None = None,
+        action=None,
+        timeout: int = 3,
+    ) -> None:
+        t = Adw.Toast.new(str(message))
+        t.set_timeout(timeout)
+        if action_label and action is not None:
+            t.set_button_label(action_label)
+            t.connect("button-clicked", lambda *_: action())
+        self.toaster.add_toast(t)
 
     def prompt_text(self, title: str, placeholder: str, on_accept,
                     accept_label: str = "Create") -> None:
@@ -902,103 +1010,18 @@ class MainWindow(Adw.ApplicationWindow):
                   name="riff-download")
 
     def show_lyrics(self) -> None:
+        """Open the Now Playing panel on the Lyrics tab (single lyrics surface)."""
         track = self.service.current_track
         if track is None:
             self.toast("Nothing is playing")
             return
-
-        def work():
-            synced, plain = lyrics_mod.fetch_lyrics(track)
-            if not synced and not plain:
-                plain = self.api.lyrics(track.video_id)
-            return synced, plain
-
-        def present(result) -> None:
-            synced, plain = result
-            if synced:
-                self._lyrics_dialog_synced(track, synced)
-            else:
-                self._lyrics_dialog_plain(track, plain)
-
-        run_async(work, present, lambda _e: self.toast("Couldn't fetch lyrics"))
-
-    def _lyrics_dialog(self, track: Track, content: Gtk.Widget) -> Adw.Dialog:
-        dialog = Adw.Dialog.new()
-        dialog.set_title(f"Lyrics — {track.title}")
-        dialog.set_content_width(480)
-        dialog.set_content_height(620)
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(Adw.HeaderBar())
-        sw = Gtk.ScrolledWindow()
-        sw.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        sw.set_vexpand(True)
-        sw.set_child(content)
-        box.append(sw)
-        dialog.set_child(box)
-        return dialog
-
-    def _lyrics_dialog_plain(self, track: Track, text: str) -> None:
-        label = Gtk.Label(label=text or "No lyrics found for this song.")
-        label.set_wrap(True)
-        label.set_margin_top(12)
-        label.set_margin_bottom(24)
-        label.set_margin_start(24)
-        label.set_margin_end(24)
-        label.set_selectable(True)
-        self._lyrics_dialog(track, label).present(self)
-
-    def _lyrics_dialog_synced(self, track: Track,
-                              lines: list[tuple[float, str]]) -> None:
-        listbox = Gtk.ListBox()
-        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
-        listbox.set_margin_top(12)
-        listbox.set_margin_bottom(24)
-        listbox.set_margin_start(16)
-        listbox.set_margin_end(16)
-        labels: list[Gtk.Label] = []
-        for ts, text in lines:
-            row = Gtk.ListBoxRow()
-            row.timestamp = ts
-            label = Gtk.Label(label=text or "♪")
-            label.set_wrap(True)
-            label.set_xalign(0.0)
-            label.set_margin_top(4)
-            label.set_margin_bottom(4)
-            label.add_css_class("dim-label")
-            row.set_child(label)
-            listbox.append(row)
-            labels.append(label)
-        listbox.connect(
-            "row-activated",
-            lambda _lb, row: self.service.seek(row.timestamp))
-
-        dialog = self._lyrics_dialog(track, listbox)
-        state = {"idx": -1}
-
-        def on_position(pos: float) -> None:
-            idx = lyrics_mod.line_index_at(lines, pos)
-            if idx == state["idx"]:
-                return
-            if 0 <= state["idx"] < len(labels):
-                labels[state["idx"]].remove_css_class("riff-lyric-current")
-                labels[state["idx"]].add_css_class("dim-label")
-            state["idx"] = idx
-            if 0 <= idx < len(labels):
-                labels[idx].remove_css_class("dim-label")
-                labels[idx].add_css_class("riff-lyric-current")
-                row = listbox.get_row_at_index(idx)
-                scroller = listbox.get_ancestor(Gtk.ScrolledWindow)
-                if row is not None and scroller is not None:
-                    # keep the active line roughly centered
-                    vadj = scroller.get_vadjustment()
-                    target = row.get_allocation().y
-                    vadj.set_value(max(0.0, target - vadj.get_page_size() / 2.5))
-
-        self.service.position_listeners.append(on_position)
-        dialog.connect(
-            "closed",
-            lambda *_: self.service.position_listeners.remove(on_position))
-        dialog.present(self)
+        self._right_sync = True
+        try:
+            self.player_bar.now_btn.set_active(True)
+            self.player_bar.queue_btn.set_active(True)
+        finally:
+            self._right_sync = False
+        self._open_right_panel(tab="lyrics")
 
     def goto(self, name: str) -> None:
         """Navigate to a main sidebar page (used by keyboard shortcuts)."""

@@ -215,7 +215,7 @@ class PlayerBar(Gtk.Box):
         transport.append(self.repeat_btn)
         row.set_center_widget(transport)
 
-        # right: volume + queue
+        # right: volume + lyrics + now playing + queue + mini
         right = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         right.set_valign(Gtk.Align.CENTER)
 
@@ -228,19 +228,34 @@ class PlayerBar(Gtk.Box):
                             lambda _b, v: self.service.set_volume(int(v)))
         right.append(self.volume)
 
+        self.lyrics_btn = Gtk.Button()
+        iconutil.set_button(self.lyrics_btn, "document-edit-symbolic")
+        self.lyrics_btn.add_css_class("flat")
+        self.lyrics_btn.set_tooltip_text("Lyrics (Alt+Shift+Y)")
+        self.lyrics_btn.set_sensitive(False)
+        self.lyrics_btn.connect("clicked", lambda *_: self.window.show_lyrics())
+        right.append(self.lyrics_btn)
+
         self.now_btn = Gtk.ToggleButton()
         now_glyph = Gtk.Label(label="♪")
         now_glyph.add_css_class("riff-heart")
         self.now_btn.set_child(now_glyph)
         self.now_btn.add_css_class("flat")
-        self.now_btn.set_tooltip_text("Now Playing panel")
+        self.now_btn.set_tooltip_text("Now Playing (queue & lyrics)")
         right.append(self.now_btn)
 
         self.queue_btn = Gtk.ToggleButton()
         iconutil.set_button(self.queue_btn, "view-list-ordered-symbolic")
         self.queue_btn.add_css_class("flat")
-        self.queue_btn.set_tooltip_text("Show queue")
+        self.queue_btn.set_tooltip_text("Queue (same panel as Now Playing)")
         right.append(self.queue_btn)
+
+        self.mini_btn = Gtk.Button()
+        iconutil.set_button(self.mini_btn, "view-restore-symbolic")
+        self.mini_btn.add_css_class("flat")
+        self.mini_btn.set_tooltip_text("Mini player (Alt+Shift+M)")
+        self.mini_btn.connect("clicked", lambda *_: self.window.open_mini_player())
+        right.append(self.mini_btn)
         row.set_end_widget(right)
 
         self.append(row)
@@ -266,6 +281,7 @@ class PlayerBar(Gtk.Box):
             self.dur_label.set_label("0:00")
             self.fav_button.set_sensitive(False)
             self.track_menu_btn.set_sensitive(False)
+            self.lyrics_btn.set_sensitive(False)
             self.video_btn.set_sensitive(False)
             self._set_link_active(self.title_btn, False)
             self._set_link_active(self.artist_btn, False)
@@ -273,6 +289,7 @@ class PlayerBar(Gtk.Box):
             return
         self.fav_button.set_sensitive(True)
         self.track_menu_btn.set_sensitive(True)
+        self.lyrics_btn.set_sensitive(True)
         # Any YT id can try video mode (music-only tracks fall back to audio).
         self.video_btn.set_sensitive(bool(track.video_id))
         menu, group = build_track_menu(self.window, track,
@@ -419,9 +436,17 @@ class PlayerBar(Gtk.Box):
         if track is None:
             return
         added = self.window.library.toggle_favorite(track)
-        self.window.toast(
-            "Added to favorites" if added else "Removed from favorites")
         self._update_fav_icon()
+
+        def undo() -> None:
+            self.window.library.toggle_favorite(track)
+            self._update_fav_icon()
+
+        if added:
+            self.window.toast("Added to favorites", action_label="Undo", action=undo)
+        else:
+            self.window.toast(
+                "Removed from favorites", action_label="Undo", action=undo)
 
     def _update_fav_icon(self) -> None:
         track = self.service.current_track

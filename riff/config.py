@@ -52,6 +52,7 @@ DEFAULTS = {
     "profile_picture": "",
     "window_width": 1100,
     "window_height": 720,
+    "recent_searches": [],  # last few Search queries (strings)
 }
 
 

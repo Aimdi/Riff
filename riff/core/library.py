@@ -236,12 +236,18 @@ class Library:
             ).fetchall()
         return [Track.from_dict(json.loads(r[0])) for r in rows]
 
-    def most_played(self, limit: int = 25) -> list[tuple[Track, int]]:
+    def most_played(
+        self,
+        limit: int = 25,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[tuple[Track, int]]:
+        where, params = self._history_filter(since, until)
         with self._lock:
             rows = self._db.execute(
-                "SELECT track_json, COUNT(*) as plays FROM history "
-                "GROUP BY video_id ORDER BY plays DESC, MAX(id) DESC LIMIT ?",
-                (limit,),
+                f"SELECT track_json, COUNT(*) as plays FROM history{where} "
+                f"GROUP BY video_id ORDER BY plays DESC, MAX(id) DESC LIMIT ?",
+                (*params, limit),
             ).fetchall()
         return [(Track.from_dict(json.loads(r[0])), r[1]) for r in rows]
 
@@ -713,25 +719,64 @@ class Library:
         except Exception:  # noqa: BLE001
             log.exception("api cache write failed")
 
-    def stats_overview(self) -> dict:
+    @staticmethod
+    def _history_filter(
+        since: float | None = None, until: float | None = None
+    ) -> tuple[str, list]:
+        """SQL WHERE clause + params for history time windows."""
+        clauses: list[str] = []
+        params: list = []
+        if since is not None:
+            clauses.append("played_at >= ?")
+            params.append(since)
+        if until is not None:
+            clauses.append("played_at < ?")
+            params.append(until)
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        return where, params
+
+    def stats_overview(
+        self, since: float | None = None, until: float | None = None
+    ) -> dict:
+        where, params = self._history_filter(since, until)
         with self._lock:
             total, distinct, first = self._db.execute(
-                "SELECT COUNT(*), COUNT(DISTINCT video_id), MIN(played_at) "
-                "FROM history").fetchone()
+                f"SELECT COUNT(*), COUNT(DISTINCT video_id), MIN(played_at) "
+                f"FROM history{where}",
+                params,
+            ).fetchone()
             seconds = self._db.execute(
-                "SELECT COALESCE(SUM(json_extract(track_json, '$.duration')), 0) "
-                "FROM history").fetchone()[0]
+                f"SELECT COALESCE(SUM(json_extract(track_json, '$.duration')), 0) "
+                f"FROM history{where}",
+                params,
+            ).fetchone()[0]
+            rows = self._db.execute(
+                f"SELECT track_json FROM history{where}", params
+            ).fetchall()
+        artists: set[str] = set()
+        for (track_json,) in rows:
+            for artist in json.loads(track_json).get("artists") or []:
+                if artist:
+                    artists.add(artist)
         return {
             "plays": total or 0,
             "songs": distinct or 0,
+            "artists": len(artists),
             "seconds": int(seconds or 0),
             "since": first,
         }
 
-    def top_artists(self, limit: int = 10) -> list[tuple[str, int]]:
+    def top_artists(
+        self,
+        limit: int = 10,
+        since: float | None = None,
+        until: float | None = None,
+    ) -> list[tuple[str, int]]:
+        where, params = self._history_filter(since, until)
         with self._lock:
             rows = self._db.execute(
-                "SELECT track_json FROM history").fetchall()
+                f"SELECT track_json FROM history{where}", params
+            ).fetchall()
         counts: dict[str, int] = {}
         for (track_json,) in rows:
             for artist in json.loads(track_json).get("artists") or []:

@@ -108,6 +108,9 @@ class HomePage(ContentPage):
         self._for_you_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top.append(self._for_you_host)
 
+        # Made for you / AI Mix hero — flagship surface (out of the menu).
+        top.append(self._ai_mix_hero())
+
         # Instant paint from cache, then refresh in the background.
         cached = self._cached_for_you()
         if cached:
@@ -115,6 +118,11 @@ class HomePage(ContentPage):
         else:
             self._show_for_you_loading()
         self._ensure_for_you()
+
+        # Highest-value local row: recently played songs (no API needed).
+        recent = self.window.library.recent(16)
+        if recent:
+            top.append(ForYouStrip("Jump back in", recent, self.window))
 
         if not sections and not cached:
             # Still show the page shell; For you may fill in shortly.
@@ -251,6 +259,95 @@ class HomePage(ContentPage):
         child = Gtk.FlowBoxChild()
         child.set_child(btn)
         return child
+
+    def _ai_mix_hero(self) -> Gtk.Widget:
+        """Hero card: current AI Mix cover + Play + Refresh."""
+        from .window import AI_MIX_PLAYLIST
+
+        card = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=16)
+        card.add_css_class("card")
+        card.set_margin_top(2)
+        card.set_margin_bottom(2)
+
+        left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        left.set_margin_top(14)
+        left.set_margin_bottom(14)
+        left.set_margin_start(14)
+        left.set_margin_end(14)
+        left.set_hexpand(True)
+
+        tracks = self._cached_for_you()
+        art = CoverArt(96)
+        if tracks:
+            art.set_url(tracks[0].thumbnail)
+        left.append(art)
+
+        meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        meta.set_valign(Gtk.Align.CENTER)
+        meta.set_hexpand(True)
+        kicker = Gtk.Label(label="Made for you")
+        kicker.add_css_class("dim-label")
+        kicker.add_css_class("caption")
+        kicker.set_xalign(0.0)
+        meta.append(kicker)
+        title = Gtk.Label(label=AI_MIX_PLAYLIST)
+        title.add_css_class("title-2")
+        title.set_xalign(0.0)
+        meta.append(title)
+        if tracks:
+            sub = Gtk.Label(label=f"{len(tracks)} songs · curated for your taste")
+        else:
+            sub = Gtk.Label(
+                label="Generate a personal mix from your listening history")
+        sub.add_css_class("dim-label")
+        sub.set_xalign(0.0)
+        sub.set_wrap(True)
+        meta.append(sub)
+
+        actions = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        actions.set_margin_top(4)
+        play = Gtk.Button(label="Play")
+        play.add_css_class("pill")
+        play.add_css_class("suggested-action")
+        play.set_sensitive(bool(tracks))
+
+        def play_mix(_b=None) -> None:
+            from .window import AI_MIX_PLAYLIST as name
+            pid = self.window.library.find_playlist(name)
+            full = (self.window.library.playlist_tracks(pid)
+                    if pid is not None else [])
+            if full:
+                self.window.service.play_tracks(full, start=0)
+            else:
+                self.window.toast("Generate an AI Mix first")
+
+        play.connect("clicked", play_mix)
+        actions.append(play)
+
+        refresh = Gtk.Button(label="Refresh")
+        refresh.add_css_class("pill")
+        refresh.set_tooltip_text("Generate a fresh AI Mix")
+        refresh.connect(
+            "clicked", lambda *_: self.window.refresh_ai_mix(interactive=True))
+        actions.append(refresh)
+
+        if tracks:
+            open_pl = Gtk.Button(label="Open")
+            open_pl.add_css_class("flat")
+
+            def open_mix(_b=None) -> None:
+                from .window import AI_MIX_PLAYLIST as name
+                pid = self.window.library.find_playlist(name)
+                if pid is not None:
+                    self.window.open_local_playlist(pid, name)
+
+            open_pl.connect("clicked", open_mix)
+            actions.append(open_pl)
+
+        meta.append(actions)
+        left.append(meta)
+        card.append(left)
+        return card
 
     def _cached_for_you(self) -> list[Track]:
         from .window import AI_MIX_PLAYLIST
@@ -503,17 +600,20 @@ class BrowsePage(Gtk.Box):
 
 class SearchPage(ContentPage):
     FILTERS = [
+        ("all", "All"),
         ("songs", "Songs"),
         ("albums", "Albums"),
         ("artists", "Artists"),
         ("playlists", "Playlists"),
     ]
+    _RECENT_MAX = 8
 
     def __init__(self, window):
         super().__init__(window)
         self._query = ""
-        self._kind = "songs"
+        self._kind = "all"
         self._search_seq = 0
+        self._suggest_seq = 0
 
         controls = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         controls.set_margin_top(12)
@@ -525,6 +625,29 @@ class SearchPage(ContentPage):
         self.entry.connect("activate", self._on_search)
         self.entry.connect("search-changed", self._on_maybe_search)
         controls.append(self.entry)
+
+        # Live suggestions popover
+        self._suggest_list = Gtk.ListBox()
+        self._suggest_list.add_css_class("boxed-list")
+        self._suggest_list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self._suggest_list.connect(
+            "row-activated", self._on_suggestion_activated)
+        suggest_scroll = Gtk.ScrolledWindow()
+        suggest_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        suggest_scroll.set_max_content_height(240)
+        suggest_scroll.set_propagate_natural_height(True)
+        suggest_scroll.set_child(self._suggest_list)
+        self._suggest_popover = Gtk.Popover()
+        self._suggest_popover.set_autohide(True)
+        self._suggest_popover.set_has_arrow(False)
+        self._suggest_popover.set_child(suggest_scroll)
+        self._suggest_popover.set_parent(self.entry)
+
+        # Recent search chips (shown above browse when empty)
+        self._recent_host = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        controls.append(self._recent_host)
 
         filter_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._filter_buttons: dict[str, Gtk.ToggleButton] = {}
@@ -545,31 +668,106 @@ class SearchPage(ContentPage):
         self._filter_box.set_visible(False)
         self.append(controls)
 
-        # Spotify-mobile style: an empty search shows Browse (Discover +
-        # Charts & Moods); results replace it as soon as you search.
+        # Empty Search is recents + a link to Explore — not the full Browse hub.
         self._results_area = ContentPage(window)
         self._results_area.set_vexpand(True)
-        self.browse = BrowsePage(window)
+        self._empty = ContentPage(window)
+        self._empty.set_vexpand(True)
         self._mode_stack = Gtk.Stack()
         self._mode_stack.set_vexpand(True)
         self._mode_stack.set_transition_type(
             Gtk.StackTransitionType.CROSSFADE)
-        self._mode_stack.add_named(self.browse, "browse")
+        self._mode_stack.add_named(self._empty, "empty")
         self._mode_stack.add_named(self._results_area, "results")
         self.append(self._mode_stack)
+        self._paint_empty()
+        self._paint_recent_chips()
 
     def focus(self) -> None:
         self.entry.grab_focus()
-        if self._mode_stack.get_visible_child_name() == "browse":
-            self.browse.refresh()
+        if self._mode_stack.get_visible_child_name() == "empty":
+            self._paint_empty()
+            self._paint_recent_chips()
 
     def refresh(self) -> None:
-        if self._mode_stack.get_visible_child_name() == "browse":
-            self.browse.refresh()
+        if self._mode_stack.get_visible_child_name() == "empty":
+            self._paint_empty()
+            self._paint_recent_chips()
+
+    def _paint_empty(self) -> None:
+        """Recent chips live above; here: StatusPage + Explore CTA."""
+        page = status_page(
+            "system-search-symbolic",
+            "Search YouTube Music",
+            "Find songs, albums, artists and playlists — or open Explore "
+            "for Discover, charts and moods.",
+            action_label="Open Explore",
+            on_action=lambda: self.window.goto("explore"),
+        )
+        self._empty.show_widget(page)
 
     def _show_mode(self, mode: str) -> None:
+        # mode is "empty" | "results" (legacy "browse" → empty)
+        if mode == "browse":
+            mode = "empty"
         self._mode_stack.set_visible_child_name(mode)
         self._filter_box.set_visible(mode == "results")
+        self._recent_host.set_visible(mode == "empty")
+
+    def _recent_searches(self) -> list[str]:
+        raw = config.settings.get("recent_searches", [])
+        if not isinstance(raw, list):
+            return []
+        return [str(s) for s in raw if s][: self._RECENT_MAX]
+
+    def _save_recent(self, query: str) -> None:
+        q = query.strip()
+        if not q:
+            return
+        recent = [q] + [
+            s for s in self._recent_searches() if s.lower() != q.lower()
+        ]
+        config.settings.set("recent_searches", recent[: self._RECENT_MAX])
+
+    def _clear_recent(self) -> None:
+        config.settings.set("recent_searches", [])
+        self._paint_recent_chips()
+
+    def _paint_recent_chips(self) -> None:
+        while child := self._recent_host.get_first_child():
+            self._recent_host.remove(child)
+        recent = self._recent_searches()
+        if not recent:
+            self._recent_host.set_visible(False)
+            return
+        self._recent_host.set_visible(True)
+        head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        t = Gtk.Label(label="Recent")
+        t.add_css_class("caption")
+        t.add_css_class("dim-label")
+        t.set_xalign(0.0)
+        t.set_hexpand(True)
+        head.append(t)
+        clear = Gtk.Button(label="Clear")
+        clear.add_css_class("flat")
+        clear.connect("clicked", lambda *_: self._clear_recent())
+        head.append(clear)
+        self._recent_host.append(head)
+        chips = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        for q in recent:
+            chip = Gtk.Button(label=q)
+            chip.add_css_class("pill")
+            chip.connect("clicked", self._on_recent_chip, q)
+            chips.append(chip)
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.NEVER)
+        scroller.set_child(chips)
+        self._recent_host.append(scroller)
+
+    def _on_recent_chip(self, _btn, query: str) -> None:
+        self.entry.set_text(query)
+        self._query = query
+        self._run_search()
 
     def _on_filter(self, button: Gtk.ToggleButton, key: str) -> None:
         if button.get_active():
@@ -578,29 +776,74 @@ class SearchPage(ContentPage):
                 self._run_search()
 
     def _on_maybe_search(self, entry: Gtk.SearchEntry) -> None:
-        # Only auto-search once the user pauses; GTK already debounces
-        # search-changed (~150 ms). Require a few chars to avoid noise.
         text = entry.get_text().strip()
         if not text:
-            # cleared -> back to Browse, like Spotify's search tab
             self._query = ""
-            self._search_seq += 1  # invalidate in-flight results
-            self._show_mode("browse")
+            self._search_seq += 1
+            self._hide_suggestions()
+            self._show_mode("empty")
             return
+        if len(text) >= 2:
+            self._load_suggestions(text)
         if len(text) >= 3 and text != self._query:
             self._query = text
             self._run_search()
 
     def _on_search(self, entry: Gtk.SearchEntry) -> None:
         self._query = entry.get_text().strip()
+        self._hide_suggestions()
         if self._query:
             self._run_search()
+
+    def _load_suggestions(self, text: str) -> None:
+        self._suggest_seq += 1
+        seq = self._suggest_seq
+
+        def work():
+            return self.window.api.search_suggestions(text)
+
+        def done(suggestions: list[str]) -> None:
+            if seq != self._suggest_seq:
+                return
+            self._suggest_list.remove_all()
+            if not suggestions:
+                self._hide_suggestions()
+                return
+            for s in suggestions[:8]:
+                row = Adw.ActionRow()
+                row.set_title(s)
+                row.set_activatable(True)
+                self._suggest_list.append(row)
+            self._suggest_popover.popup()
+
+        run_async(
+            work, done, lambda _e: self._hide_suggestions(), name="riff-suggest")
+
+    def _hide_suggestions(self) -> None:
+        try:
+            self._suggest_popover.popdown()
+        except Exception:
+            pass
+
+    def _on_suggestion_activated(self, _lb, row: Gtk.ListBoxRow) -> None:
+        child = row.get_child()
+        title = child.get_title() if isinstance(child, Adw.ActionRow) else ""
+        if not title:
+            return
+        self._hide_suggestions()
+        self.entry.set_text(title)
+        self._query = title
+        self._run_search()
 
     def _run_search(self) -> None:
         self._show_mode("results")
         query, kind = self._query, self._kind
+        if not query:
+            return
+        self._save_recent(query)
         self._search_seq += 1
         seq = self._search_seq
+        api_kind = None if kind == "all" else kind
 
         def present(results: dict) -> None:
             if seq != self._search_seq:
@@ -608,26 +851,148 @@ class SearchPage(ContentPage):
             self._present(results)
 
         self._results_area.load_async(
-            lambda: self.window.api.search(query, kind), present
+            lambda: self.window.api.search(query, api_kind), present
         )
 
     def _present(self, results: dict) -> None:
         area = self._results_area
         songs = results.get("songs") or []
-        cards = (results.get("albums") or []) + (results.get("playlists") or []) \
-            + (results.get("artists") or [])
+        albums = results.get("albums") or []
+        artists = results.get("artists") or []
+        playlists = results.get("playlists") or []
+
+        if self._kind == "all":
+            if not (songs or albums or artists or playlists):
+                area.show_widget(status_page(
+                    "edit-find-symbolic", "No results",
+                    f"Nothing found for “{self._query}”."))
+                return
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+            top = songs[0] if songs else (
+                albums or artists or playlists or [None])[0]
+            if top is not None:
+                box.append(self._top_result_card(
+                    top, songs[:5] if songs else None))
+            if albums:
+                box.append(Carousel(
+                    "Albums", albums[:12], self.window, card_size=140))
+            if artists:
+                box.append(Carousel(
+                    "Artists", artists[:12], self.window, card_size=140))
+            if playlists:
+                box.append(Carousel(
+                    "Playlists", playlists[:12], self.window, card_size=140))
+            area.show_widget(scroll_wrap(_padded(box)))
+            return
+
         if self._kind == "songs" and songs:
             tl = TrackList(self.window, radio_on_single=True)
             tl.set_tracks(songs)
-            box = _padded(tl)
-            area.show_widget(scroll_wrap(box))
-        elif cards:
-            grid = CardGrid(cards, self.window)
-            area.show_widget(scroll_wrap(_padded(grid)))
-        else:
-            area.show_widget(status_page(
-                "edit-find-symbolic", "No results",
-                f"Nothing found for “{self._query}”."))
+            area.show_widget(scroll_wrap(_padded(tl)))
+            return
+
+        cards = {
+            "albums": albums,
+            "artists": artists,
+            "playlists": playlists,
+        }.get(self._kind, [])
+        if cards:
+            area.show_widget(scroll_wrap(_padded(CardGrid(cards, self.window))))
+            return
+
+        area.show_widget(status_page(
+            "edit-find-symbolic", "No results",
+            f"Nothing found for “{self._query}”."))
+
+    def _top_result_card(
+        self, item, related_songs: list[Track] | None
+    ) -> Gtk.Widget:
+        outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
+        outer.add_css_class("card")
+        outer.set_margin_top(4)
+
+        left = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        left.set_margin_top(12)
+        left.set_margin_bottom(12)
+        left.set_margin_start(12)
+        left.set_margin_end(12)
+        left.set_hexpand(True)
+
+        circular = isinstance(item, Artist)
+        art = CoverArt(120, circular=circular)
+        art.set_url(getattr(item, "thumbnail", "") or "")
+        left.append(art)
+
+        meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        meta.set_valign(Gtk.Align.CENTER)
+        meta.set_hexpand(True)
+        kind = (
+            "Song" if isinstance(item, Track)
+            else "Album" if isinstance(item, Album)
+            else "Artist" if isinstance(item, Artist)
+            else "Playlist"
+        )
+        k = Gtk.Label(label=f"Top result · {kind}")
+        k.add_css_class("dim-label")
+        k.add_css_class("caption")
+        k.set_xalign(0.0)
+        meta.append(k)
+        title = getattr(item, "title", "") or getattr(item, "name", "") or ""
+        t = Gtk.Label(label=title)
+        t.add_css_class("title-2")
+        t.set_xalign(0.0)
+        t.set_wrap(True)
+        meta.append(t)
+        sub = ""
+        if isinstance(item, Track):
+            sub = item.artist
+        elif isinstance(item, Album):
+            sub = item.artist
+        elif isinstance(item, Playlist):
+            sub = item.author
+        if sub:
+            s = Gtk.Label(label=sub)
+            s.add_css_class("dim-label")
+            s.set_xalign(0.0)
+            meta.append(s)
+
+        play = Gtk.Button(label="Play")
+        play.add_css_class("pill")
+        play.add_css_class("suggested-action")
+        play.set_halign(Gtk.Align.START)
+        play.connect("clicked", lambda *_: self._play_top(item))
+        meta.append(play)
+        left.append(meta)
+        outer.append(left)
+
+        if related_songs and len(related_songs) > 1:
+            songs_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+            songs_box.set_margin_top(8)
+            songs_box.set_margin_bottom(8)
+            songs_box.set_margin_end(8)
+            songs_box.set_size_request(280, -1)
+            rest = [
+                s for s in related_songs
+                if not (isinstance(item, Track) and s.video_id == item.video_id)
+            ][:5]
+            if not rest:
+                rest = related_songs[1:6]
+            tl = TrackList(self.window, radio_on_single=True)
+            tl.set_tracks(rest)
+            songs_box.append(tl)
+            outer.append(songs_box)
+
+        return outer
+
+    def _play_top(self, item) -> None:
+        if isinstance(item, Track):
+            self.window.service.play_track_with_radio(item)
+        elif isinstance(item, Album):
+            self.window.open_album(item.browse_id)
+        elif isinstance(item, Artist) and item.browse_id:
+            self.window.open_artist(item.browse_id)
+        elif isinstance(item, Playlist):
+            self.window.open_playlist(item.playlist_id)
 
 
 class ExplorePage(ContentPage):
@@ -933,18 +1298,33 @@ class LibraryPage(ContentPage):
 
     def _present(self, tracks: list[Track]) -> None:
         if not tracks:
-            icon, title, desc = {
-                "favorites": ("emblem-favorite-symbolic", "No favorites yet",
-                              "Songs you favorite appear here."),
-                "history": ("document-open-recent-symbolic", "No history yet",
-                            "Songs you play appear here."),
-                "downloads": ("folder-download-symbolic", "No downloads yet",
-                              "Use a song's menu to download it for offline listening."),
-                "dislikes": ("action-unavailable-symbolic", "Nothing blocked",
-                             "Use a song's menu → “Never Play This” to keep it "
-                             "out of radio and AI Mix."),
+            specs = {
+                "favorites": (
+                    "emblem-favorite-symbolic", "No favorites yet",
+                    "Songs you favorite appear here.",
+                    "Search music", lambda: self.window.goto("search"),
+                ),
+                "history": (
+                    "document-open-recent-symbolic", "No history yet",
+                    "Songs you play appear here.",
+                    "Go to Home", lambda: self.window.goto("home"),
+                ),
+                "downloads": (
+                    "folder-download-symbolic", "No downloads yet",
+                    "Use a song's menu to download it for offline listening.",
+                    "Search music", lambda: self.window.goto("search"),
+                ),
+                "dislikes": (
+                    "action-unavailable-symbolic", "Nothing blocked",
+                    "Use a song's menu → “Never Play This” to keep it "
+                    "out of radio and AI Mix.",
+                    None, None,
+                ),
             }[self.kind]
-            self.show_widget(status_page(icon, title, desc))
+            icon, title, desc, action_label, on_action = specs
+            self.show_widget(status_page(
+                icon, title, desc,
+                action_label=action_label, on_action=on_action))
             return
         tl = TrackList(self.window)
         tl.set_tracks(tracks)
@@ -954,32 +1334,116 @@ class LibraryPage(ContentPage):
 class StatsPage(ContentPage):
     """Listening statistics from the local history database."""
 
+    RANGES = [
+        ("week", "Week", 7),
+        ("month", "Month", 30),
+        ("year", "Year", 365),
+        ("all", "All time", 0),
+    ]
+
+    def __init__(self, window):
+        super().__init__(window)
+        self._range = "month"
+
     def refresh(self) -> None:
         lib = self.window.library
+        since, until, prev_since, prev_until, activity_days = self._window_for(
+            self._range)
 
         def work():
-            return (lib.stats_overview(), lib.most_played(10),
-                    lib.top_artists(10), lib.plays_by_day(14))
+            overview = lib.stats_overview(since=since, until=until)
+            prev = (
+                lib.stats_overview(since=prev_since, until=prev_until)
+                if prev_since is not None else None
+            )
+            return (
+                overview,
+                prev,
+                lib.most_played(10, since=since, until=until),
+                lib.top_artists(10, since=since, until=until),
+                lib.plays_by_day(activity_days) if activity_days
+                else lib.plays_by_day(30),
+            )
 
         self.load_async(work, self._present)
 
-    def _present(self, data) -> None:
-        overview, top_songs, top_artists, days = data
-        if not overview["plays"]:
-            self.show_widget(status_page(
-                "riff-stats-symbolic", "No stats yet",
-                "Play some music and your listening trends appear here."))
-            return
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+    @staticmethod
+    def _window_for(key: str) -> tuple:
+        import time
 
-        # overview numbers
+        now = time.time()
+        if key == "week":
+            secs = 7 * 86400
+            return now - secs, None, now - 2 * secs, now - secs, 7
+        if key == "month":
+            secs = 30 * 86400
+            return now - secs, None, now - 2 * secs, now - secs, 30
+        if key == "year":
+            secs = 365 * 86400
+            return now - secs, None, now - 2 * secs, now - secs, 30
+        return None, None, None, None, 30
+
+    def _on_range(self, button: Gtk.ToggleButton, key: str) -> None:
+        if button.get_active() and key != self._range:
+            self._range = key
+            self.refresh()
+
+    @staticmethod
+    def _delta_label(current: int, previous: int | None) -> str:
+        if previous is None or previous == 0:
+            return ""
+        pct = round(100 * (current - previous) / previous)
+        if pct == 0:
+            return "±0%"
+        return f"{pct:+d}%"
+
+    def _range_selector(self) -> Gtk.Box:
+        range_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        group_first: Gtk.ToggleButton | None = None
+        for key, label, _days in self.RANGES:
+            btn = Gtk.ToggleButton(label=label)
+            btn.add_css_class("pill")
+            if group_first is None:
+                group_first = btn
+            else:
+                btn.set_group(group_first)
+            btn.set_active(key == self._range)
+            btn.connect("toggled", self._on_range, key)
+            range_row.append(btn)
+        return range_row
+
+    def _present(self, data) -> None:
+        overview, prev, top_songs, top_artists, days = data
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
+        box.append(self._range_selector())
+
+        if not overview["plays"]:
+            box.append(status_page(
+                "riff-stats-symbolic", "No stats yet",
+                "Play some music in this period and your listening trends "
+                "appear here.",
+                action_label="Go to Home",
+                on_action=lambda: self.window.goto("home")))
+            self.show_widget(scroll_wrap(_padded(box)))
+            return
+
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
         row.set_homogeneous(True)
         hours = overview["seconds"] / 3600
-        for value, label in (
-                (f"{overview['plays']}", "plays"),
-                (f"{overview['songs']}", "different songs"),
-                (f"{hours:.1f} h", "listened")):
+        prev_hours = (prev["seconds"] / 3600) if prev else None
+        cards = [
+            (f"{overview['plays']}", "plays",
+             overview["plays"], prev["plays"] if prev else None),
+            (f"{overview['songs']}", "songs",
+             overview["songs"], prev["songs"] if prev else None),
+            (f"{overview.get('artists', 0)}", "artists",
+             overview.get("artists", 0),
+             prev.get("artists", 0) if prev else None),
+            (f"{hours:.1f} h", "listened",
+             int(hours * 10),
+             int(prev_hours * 10) if prev_hours is not None else None),
+        ]
+        for value, label, cur, prv in cards:
             card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             card.add_css_class("card")
             card.set_margin_top(2)
@@ -988,14 +1452,33 @@ class StatsPage(ContentPage):
             v.set_margin_top(14)
             n = Gtk.Label(label=label)
             n.add_css_class("dim-label")
-            n.set_margin_bottom(14)
             card.append(v)
             card.append(n)
+            delta = self._delta_label(cur, prv)
+            if delta:
+                dlab = Gtk.Label(label=delta)
+                dlab.add_css_class("caption")
+                if delta.startswith("+"):
+                    dlab.add_css_class("success")
+                elif delta.startswith("-"):
+                    dlab.add_css_class("error")
+                else:
+                    dlab.add_css_class("dim-label")
+                dlab.set_margin_bottom(10)
+                card.append(dlab)
+                n.set_margin_bottom(4)
+            else:
+                n.set_margin_bottom(14)
             row.append(card)
         box.append(row)
 
-        # last 14 days
-        title = Gtk.Label(label="Last 14 days")
+        period_label = {
+            "week": "Last 7 days",
+            "month": "Last 30 days",
+            "year": "Recent activity",
+            "all": "Last 30 days",
+        }.get(self._range, "Activity")
+        title = Gtk.Label(label=period_label)
         title.add_css_class("title-3")
         title.set_xalign(0.0)
         box.append(title)
@@ -1019,22 +1502,56 @@ class StatsPage(ContentPage):
             day_list.append(line)
         box.append(day_list)
 
-        # top songs
         if top_songs:
             t = Gtk.Label(label="Top songs")
             t.add_css_class("title-3")
             t.set_xalign(0.0)
             box.append(t)
-            tl = TrackList(self.window, numbered=True, radio_on_single=True)
-            tl.set_tracks([track for track, _plays in top_songs])
-            box.append(tl)
+            max_plays = max(p for _tr, p in top_songs) or 1
+            song_list = Gtk.Box(
+                orientation=Gtk.Orientation.VERTICAL, spacing=6)
+            for i, (track, plays) in enumerate(top_songs, 1):
+                line = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                num = Gtk.Label(label=str(i))
+                num.add_css_class("dim-label")
+                num.set_width_chars(2)
+                line.append(num)
+                art = CoverArt(36)
+                art.set_url(track.thumbnail)
+                line.append(art)
+                text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                text.set_hexpand(True)
+                tt = Gtk.Label(label=track.title)
+                tt.set_xalign(0.0)
+                tt.add_css_class("heading")
+                text.append(tt)
+                bar = Gtk.LevelBar.new_for_interval(0, max_plays)
+                bar.set_value(plays)
+                bar.set_hexpand(True)
+                text.append(bar)
+                line.append(text)
+                pc = Gtk.Label(label=str(plays))
+                pc.add_css_class("numeric")
+                pc.add_css_class("dim-label")
+                pc.set_width_chars(4)
+                line.append(pc)
+                btn = Gtk.Button()
+                btn.add_css_class("flat")
+                btn.set_child(line)
+                btn.connect(
+                    "clicked",
+                    lambda _b, tr=track: self.window.service.play_track_with_radio(tr),
+                )
+                song_list.append(btn)
+            box.append(song_list)
 
-        # top artists
         if top_artists:
             t = Gtk.Label(label="Top artists")
             t.add_css_class("title-3")
             t.set_xalign(0.0)
             box.append(t)
+            max_a = max(p for _n, p in top_artists) or 1
             lb = Gtk.ListBox()
             lb.add_css_class("boxed-list")
             lb.set_selection_mode(Gtk.SelectionMode.NONE)
@@ -1042,6 +1559,11 @@ class StatsPage(ContentPage):
                 row_a = Adw.ActionRow()
                 row_a.set_title(f"{i}.  {name}")
                 row_a.set_subtitle(f"{plays} plays")
+                bar = Gtk.LevelBar.new_for_interval(0, max_a)
+                bar.set_value(plays)
+                bar.set_size_request(80, -1)
+                bar.set_valign(Gtk.Align.CENTER)
+                row_a.add_suffix(bar)
                 lb.append(row_a)
             box.append(lb)
 

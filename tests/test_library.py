@@ -125,11 +125,21 @@ def test_stats(lib):
         lib.record_play(track(i))
     o = lib.stats_overview()
     assert o["plays"] == 4 and o["songs"] == 2
+    assert o["artists"] == 2
     top = lib.top_artists()
     assert top[0] == ("Artist 1", 3)
     days = lib.plays_by_day(3)
     assert len(days) == 3
     assert days[-1][1] == 4  # all plays happened "today"
+
+    import time
+
+    future = time.time() + 10_000
+    empty = lib.stats_overview(since=future)
+    assert empty["plays"] == 0
+    past = lib.most_played(5, since=time.time() - 3600)
+    assert past[0][0].video_id == "v1"
+    assert past[0][1] == 3
 
 
 def test_find_and_replace_playlist(lib):

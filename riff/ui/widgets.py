@@ -199,16 +199,31 @@ def build_track_menu(window, track: Track, on_favorite=None):
 
     def default_favorite():
         added = window.library.toggle_favorite(track)
-        window.toast("Added to favorites" if added else "Removed from favorites")
+
+        def undo() -> None:
+            window.library.toggle_favorite(track)
+
+        if added:
+            window.toast("Added to favorites", action_label="Undo", action=undo)
+        else:
+            window.toast(
+                "Removed from favorites", action_label="Undo", action=undo)
 
     def toggle_dislike():
         if window.library.is_disliked(track.video_id):
             window.library.remove_dislike(track.video_id)
-            window.toast(f"“{track.title}” allowed again")
+            window.toast(
+                f"“{track.title}” allowed again",
+                action_label="Undo",
+                action=lambda: window.library.add_dislike(track),
+            )
         else:
             window.library.add_dislike(track)
             window.toast(
-                f"“{track.title}” won't appear in radio or AI Mix anymore")
+                f"“{track.title}” won't appear in radio or AI Mix anymore",
+                action_label="Undo",
+                action=lambda: window.library.remove_dislike(track.video_id),
+            )
 
     def go_artist():
         for aid in track.artist_ids:
@@ -295,7 +310,20 @@ class TrackRow(Gtk.ListBoxRow):
     def _toggle_favorite(self) -> None:
         added = self._window.library.toggle_favorite(self.track)
         set_heart_state(self._fav_btn, added)
-        self._window.toast("Added to favorites" if added else "Removed from favorites")
+
+        def undo() -> None:
+            self._window.library.toggle_favorite(self.track)
+            set_heart_state(
+                self._fav_btn,
+                self._window.library.is_favorite(self.track.video_id),
+            )
+
+        if added:
+            self._window.toast(
+                "Added to favorites", action_label="Undo", action=undo)
+        else:
+            self._window.toast(
+                "Removed from favorites", action_label="Undo", action=undo)
 
 
 class TrackList(Gtk.ListBox):
@@ -587,7 +615,14 @@ class CardGrid(Gtk.FlowBox):
             self.append(MediaCard(item, window, size=size))
 
 
-def status_page(icon: str, title: str, description: str = "") -> Gtk.Widget:
+def status_page(
+    icon: str,
+    title: str,
+    description: str = "",
+    *,
+    action_label: str | None = None,
+    on_action=None,
+) -> Gtk.Widget:
     from gi.repository import Adw
 
     page = Adw.StatusPage()
@@ -596,6 +631,13 @@ def status_page(icon: str, title: str, description: str = "") -> Gtk.Widget:
     if description:
         page.set_description(description)
     page.set_vexpand(True)
+    if action_label and on_action is not None:
+        btn = Gtk.Button(label=action_label)
+        btn.add_css_class("pill")
+        btn.add_css_class("suggested-action")
+        btn.set_halign(Gtk.Align.CENTER)
+        btn.connect("clicked", lambda *_: on_action())
+        page.set_child(btn)
     return page
 
 
