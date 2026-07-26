@@ -4,61 +4,90 @@
 # Keeps its own clone under ~/.cache/riff/update-src, so it works no matter
 # where (or whether) you originally cloned the repo. Rebuilds the pacman
 # package when riff-player is installed via pacman, otherwise updates the
-# install.sh virtualenv.
+# install.sh virtualenv. Updates BOTH when both are present (PATH shadowing).
 set -euo pipefail
 
 REPO="${RIFF_UPDATE_REPO:-https://github.com/Aimdi/Riff.git}"
 SRC="${RIFF_UPDATE_SRC:-${XDG_CACHE_HOME:-$HOME/.cache}/riff/update-src}"
+VENV="${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv"
 FORCE=0
 [ "${1:-}" = "--force" ] && FORCE=1
 
-echo "==> Fetching latest Riff…"
-if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" fetch --quiet origin
-    # Prefer the remote HEAD (default branch); fall back to FETCH_HEAD tip.
-    if git -C "$SRC" rev-parse --verify --quiet origin/HEAD >/dev/null; then
-        git -C "$SRC" reset --quiet --hard origin/HEAD
-    else
-        git -C "$SRC" remote set-head origin -a >/dev/null 2>&1 || true
-        git -C "$SRC" reset --quiet --hard origin/HEAD
+_riff_version_of() {
+    # $1 = path to a riff launcher (or empty to use PATH)
+    local bin="${1:-riff}"
+    if [ -n "${1:-}" ] && [ ! -x "$1" ]; then
+        echo ""
+        return
     fi
-else
-    mkdir -p "$(dirname "$SRC")"
-    git clone --quiet --depth 1 "$REPO" "$SRC"
-fi
+    "$bin" --version 2>/dev/null | awk '{print $2}' || true
+}
+
+echo "==> Fetching latest Riff…"
+rm -rf "$SRC"
+mkdir -p "$(dirname "$SRC")"
+git clone --quiet --depth 1 "$REPO" "$SRC"
 
 if [ ! -f "$SRC/pyproject.toml" ] || [ ! -f "$SRC/packaging/PKGBUILD" ]; then
     echo "Update clone at $SRC looks incomplete (missing pyproject.toml)." >&2
-    echo "Remove it and retry:  rm -rf \"$SRC\" && riff-update" >&2
     exit 1
 fi
 
 NEW_VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/riff/__init__.py")
-CURRENT_VERSION=$(riff --version 2>/dev/null | awk '{print $2}' || true)
+PATH_RIFF=$(command -v riff 2>/dev/null || true)
+CURRENT_VERSION=$(_riff_version_of)
 
-echo "==> Installed: ${CURRENT_VERSION:-none}   Latest: $NEW_VERSION"
-if [ "$FORCE" -eq 0 ] && [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
+echo "==> PATH riff: ${PATH_RIFF:-none}  (${CURRENT_VERSION:-unknown})"
+echo "==> Latest source: $NEW_VERSION"
+if [ "$FORCE" -eq 0 ] && [ -n "$CURRENT_VERSION" ] && [ "$CURRENT_VERSION" = "$NEW_VERSION" ]; then
     echo "Already up to date. (Use 'riff-update --force' to rebuild anyway.)"
     exit 0
 fi
 
+UPDATED=0
+
 if command -v pacman >/dev/null && pacman -Q riff-player >/dev/null 2>&1; then
-    echo "==> Rebuilding pacman package (makepkg will ask for sudo)…"
-    # Run from packaging/; PKGBUILD resolves the repo root via $startdir/..
+    echo "==> Rebuilding pacman package riff-player (makepkg may ask for sudo)…"
     cd "$SRC/packaging"
-    # Drop stale src/ leftovers from a previous failed build.
     rm -rf src pkg
-    makepkg -si --noconfirm
-elif [ -x "${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv/bin/pip" ]; then
-    VENV="${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv"
+    makepkg -si --noconfirm --cleanbuild
+    UPDATED=1
+fi
+
+if [ -x "$VENV/bin/pip" ]; then
     echo "==> Updating virtualenv install at $VENV…"
     "$VENV/bin/pip" install --quiet --upgrade ytmusicapi yt-dlp
     "$VENV/bin/pip" install --quiet --no-deps --force-reinstall "$SRC"
-else
-    echo "Couldn't find a Riff installation to update." >&2
-    echo "Install first: cd $SRC && ./install.sh   (or: cd packaging && makepkg -si)" >&2
-    exit 1
+    # Keep ~/.local/bin/riff pointing at the venv if that launcher exists.
+    if [ -L "$HOME/.local/bin/riff" ] || [ -f "$HOME/.local/bin/riff" ]; then
+        ln -sfi "$VENV/bin/riff" "$HOME/.local/bin/riff"
+    fi
+    UPDATED=1
 fi
 
+if [ "$UPDATED" -eq 0 ]; then
+    echo "==> No existing install found — running install.sh…"
+    cd "$SRC"
+    ./install.sh
+    UPDATED=1
+fi
+
+hash -r 2>/dev/null || true
+FINAL_BIN=$(command -v riff 2>/dev/null || true)
+FINAL_VER=$(_riff_version_of)
+
 echo
-echo "Done! Riff is now $NEW_VERSION — restart the app to use it."
+if [ "$FINAL_VER" = "$NEW_VERSION" ]; then
+    echo "Done! $(command -v riff) reports riff $FINAL_VER"
+    echo "Restart the app to use Podcasts / Audiobooks / the new shell."
+    exit 0
+fi
+
+echo "Update finished, but PATH still reports: ${FINAL_VER:-none}" >&2
+echo "  which -a riff:" >&2
+which -a riff >&2 || true
+echo >&2
+echo "If pacman owns the package, try:  /usr/bin/riff --version" >&2
+echo "If you used install.sh, try:       $VENV/bin/riff --version" >&2
+echo "Remove a stale launcher if needed: rm -f ~/.local/bin/riff" >&2
+exit 1
