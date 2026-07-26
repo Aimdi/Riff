@@ -107,7 +107,11 @@ class PlaybackService:
     def play_tracks(self, tracks: list[Track], start: int = 0,
                     source: str = "user_click") -> None:
         """Replace the queue and start playing."""
-        playable = [t for t in tracks if t.video_id or t.local_path]
+        playable = [
+            t for t in tracks
+            if t.video_id or t.local_path or (t.stream_url or "").startswith(
+                ("http://", "https://"))
+        ]
         if not playable:
             return
         self._maybe_scrobble()
@@ -455,6 +459,20 @@ class PlaybackService:
                 self._after_start(track)
                 return
 
+        # Podcasts / direct streams — no yt-dlp.
+        stream = (track.stream_url or "").strip()
+        if stream.startswith(("http://", "https://")):
+            self.engine.play_uri(stream)
+            self._after_start(track)
+            return
+        if (track.video_id or "").startswith("podcast_"):
+            self._emit(
+                self.error_listeners,
+                f"Couldn't play “{track.title}”: missing stream URL")
+            if self.queue.has_next():
+                self.next()
+            return
+
         want_video = self.video_mode and bool(track.video_id)
 
         # Resolve off the main loop. Video mode always resolves audio for mpv
@@ -538,6 +556,11 @@ class PlaybackService:
         nxt = self.queue.peek_next()
         if not nxt or nxt.local_path or not nxt.video_id:
             return
+        # Direct streams / podcasts already have a URI.
+        if (nxt.stream_url or "").startswith(("http://", "https://")):
+            return
+        if (nxt.video_id or "").startswith("podcast_"):
+            return
         if self.resolver.cached(nxt.video_id):
             return
         run_async(
@@ -547,6 +570,9 @@ class PlaybackService:
 
     def _extend_with_radio(self, seed: Track) -> None:
         if self._radio_pending or not seed.video_id:
+            return
+        if (seed.video_id or "").startswith("podcast_") or (
+                seed.stream_url or "").startswith(("http://", "https://")):
             return
         self._radio_pending = True
 
@@ -583,12 +609,18 @@ class PlaybackService:
             return
         # Queue exhausted: optionally keep going with radio.
         cur = self.queue.current
-        if cur and config.settings.get("autoplay_radio", True):
+        if cur and config.settings.get("autoplay_radio", True) and not (
+                (cur.video_id or "").startswith("podcast_")
+                or (cur.stream_url or "").startswith(("http://", "https://"))):
             self._continue_radio_after(cur)
         else:
             self._emit(self.state_listeners, STATE_STOPPED)
 
     def _continue_radio_after(self, last: Track) -> None:
+        if (last.video_id or "").startswith("podcast_"):
+            self._emit(self.state_listeners, STATE_STOPPED)
+            return
+
         def fetch() -> list[Track]:
             return self.api.radio(last.video_id)
 

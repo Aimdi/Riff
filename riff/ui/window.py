@@ -29,6 +29,7 @@ from . import iconutil
 from .full_player import FullPlayer
 from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
+from .podcasts import PodcastsPage
 
 CSS = b"""
 /* Riff Mobile surface language on desktop */
@@ -237,6 +238,7 @@ SIDEBAR_ITEMS = [
     ("explore", "Explore", "web-browser-symbolic"),
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
+    ("podcasts", "Podcasts", "emblem-music-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
     ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
@@ -292,6 +294,7 @@ class MainWindow(Adw.ApplicationWindow):
             "library": LibraryHub(self),
             "albums": AlbumsPage(self),
             "artists": ArtistsPage(self),
+            "podcasts": PodcastsPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)

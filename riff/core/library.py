@@ -109,6 +109,13 @@ CREATE TABLE IF NOT EXISTS system_mixes (
     payload TEXT NOT NULL,
     generated_ts INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS podcast_subs (
+    feed_url TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    artwork TEXT NOT NULL DEFAULT '',
+    subscribed_at REAL NOT NULL
+);
 """
 
 
@@ -173,6 +180,60 @@ class Library:
                 "ALTER TABLE playlist_folders ADD COLUMN emoji TEXT "
                 "NOT NULL DEFAULT '🎵'"
             )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS podcast_subs ("
+            "feed_url TEXT PRIMARY KEY,"
+            "title TEXT NOT NULL,"
+            "author TEXT NOT NULL DEFAULT '',"
+            "artwork TEXT NOT NULL DEFAULT '',"
+            "subscribed_at REAL NOT NULL)"
+        )
+
+    # -- podcasts ----------------------------------------------------------
+
+    def subscribe_podcast(
+        self, feed_url: str, title: str, author: str = "", artwork: str = "",
+    ) -> None:
+        feed_url = (feed_url or "").strip()
+        if not feed_url:
+            return
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO podcast_subs "
+                "(feed_url, title, author, artwork, subscribed_at) "
+                "VALUES (?,?,?,?,?)",
+                (feed_url, title or feed_url, author or "", artwork or "",
+                 time.time()),
+            )
+
+    def unsubscribe_podcast(self, feed_url: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_subs WHERE feed_url = ?", (feed_url,))
+
+    def is_podcast_subscribed(self, feed_url: str) -> bool:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM podcast_subs WHERE feed_url = ?",
+                (feed_url,)).fetchone()
+        return row is not None
+
+    def podcast_subscriptions(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT feed_url, title, author, artwork, subscribed_at "
+                "FROM podcast_subs ORDER BY subscribed_at DESC"
+            ).fetchall()
+        return [
+            {
+                "feed_url": r[0],
+                "title": r[1],
+                "author": r[2],
+                "artwork": r[3],
+                "subscribed_at": r[4],
+            }
+            for r in rows
+        ]
 
     # -- favorites ---------------------------------------------------------
 

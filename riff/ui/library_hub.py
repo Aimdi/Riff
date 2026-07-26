@@ -11,6 +11,8 @@ from .widgets import CardGrid, scroll_wrap, status_page
 
 # Overflow destinations under "More" on the mobile rail.
 _MORE_DESTINATIONS = (
+    ("podcasts", "Podcasts", "Apple directory + RSS — play episodes in Riff",
+     "emblem-music-symbolic"),
     ("explore", "Explore & Discover", "Charts, moods, and personal picks",
      "web-browser-symbolic"),
     ("history", "History", "Recently played",
