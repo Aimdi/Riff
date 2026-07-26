@@ -9,7 +9,8 @@ from tests.test_service import FakeApi, FakeEngine, FakeResolver, sync_run_async
 
 SAMPLE_RSS = b"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"
- xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+ xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"
+ xmlns:podcast="https://podcastindex.org/namespace/1.0">
   <channel>
     <title>Demo Show</title>
     <itunes:image href="https://example.com/show.jpg"/>
@@ -20,6 +21,9 @@ SAMPLE_RSS = b"""<?xml version="1.0" encoding="UTF-8"?>
       <pubDate>Mon, 19 Jul 2026 10:00:00 GMT</pubDate>
       <itunes:duration>1:02:03</itunes:duration>
       <enclosure url="https://cdn.example.com/ep1.mp3" length="12345" type="audio/mpeg"/>
+      <podcast:chapters url="https://cdn.example.com/ch.json" type="application/json"/>
+      <podcast:transcript url="https://cdn.example.com/ep1.vtt" type="text/vtt"/>
+      <podcast:transcript url="https://cdn.example.com/ep1.json" type="application/json"/>
     </item>
     <item>
       <title>No audio</title>
@@ -45,10 +49,14 @@ def test_parse_episodes_enclosures_and_duration():
     assert "Hello world" in eps[0].description
     assert eps[0].pub_date == "19 Jul 2026"
     assert eps[1].duration_sec == 90
+    assert eps[0].chapters_url.endswith("ch.json")
+    assert eps[0].transcript_url.endswith("ep1.json")  # prefers JSON
+    assert "json" in eps[0].transcript_type
     track = eps[0].to_track()
     assert track.video_id.startswith("podcast_")
     assert track.stream_url.startswith("https://")
     assert track.artists == ["Demo Show"]
+    assert track.transcript_url == eps[0].transcript_url
 
 
 def test_podcast_subscribe_roundtrip():

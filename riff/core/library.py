@@ -124,7 +124,9 @@ CREATE TABLE IF NOT EXISTS podcast_progress (
     stream_url TEXT NOT NULL DEFAULT '',
     position_ms INTEGER NOT NULL DEFAULT 0,
     duration_ms INTEGER NOT NULL DEFAULT 0,
-    updated_at REAL NOT NULL
+    updated_at REAL NOT NULL,
+    transcript_url TEXT NOT NULL DEFAULT '',
+    transcript_type TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -207,8 +209,23 @@ class Library:
             "stream_url TEXT NOT NULL DEFAULT '',"
             "position_ms INTEGER NOT NULL DEFAULT 0,"
             "duration_ms INTEGER NOT NULL DEFAULT 0,"
-            "updated_at REAL NOT NULL)"
+            "updated_at REAL NOT NULL,"
+            "transcript_url TEXT NOT NULL DEFAULT '',"
+            "transcript_type TEXT NOT NULL DEFAULT '')"
         )
+        pcols = {
+            r[1]
+            for r in self._db.execute(
+                "PRAGMA table_info(podcast_progress)").fetchall()
+        }
+        if pcols and "transcript_url" not in pcols:
+            self._db.execute(
+                "ALTER TABLE podcast_progress ADD COLUMN "
+                "transcript_url TEXT NOT NULL DEFAULT ''")
+        if pcols and "transcript_type" not in pcols:
+            self._db.execute(
+                "ALTER TABLE podcast_progress ADD COLUMN "
+                "transcript_type TEXT NOT NULL DEFAULT ''")
 
     # -- podcasts ----------------------------------------------------------
 
@@ -266,6 +283,8 @@ class Library:
         stream_url: str = "",
         position_ms: int = 0,
         duration_ms: int = 0,
+        transcript_url: str = "",
+        transcript_type: str = "",
     ) -> None:
         """Upsert or clear an in-progress podcast episode (mobile rules)."""
         from . import podcast_progress as pp
@@ -283,12 +302,19 @@ class Library:
             return
         if not pp.should_persist(position_ms, duration_ms):
             return
+        # Preserve transcript fields when a tick omits them.
+        prev = self.podcast_progress(episode_id) or {}
+        if not transcript_url:
+            transcript_url = str(prev.get("transcript_url") or "")
+        if not transcript_type:
+            transcript_type = str(prev.get("transcript_type") or "")
         with self._lock, self._db:
             self._db.execute(
                 "INSERT OR REPLACE INTO podcast_progress "
                 "(episode_id, title, artist, artwork, stream_url, "
-                "position_ms, duration_ms, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "position_ms, duration_ms, updated_at, "
+                "transcript_url, transcript_type) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     episode_id,
                     title or "",
@@ -298,6 +324,8 @@ class Library:
                     position_ms,
                     duration_ms,
                     time.time(),
+                    transcript_url or "",
+                    transcript_type or "",
                 ),
             )
 
@@ -312,7 +340,8 @@ class Library:
         with self._lock:
             row = self._db.execute(
                 "SELECT episode_id, title, artist, artwork, stream_url, "
-                "position_ms, duration_ms, updated_at "
+                "position_ms, duration_ms, updated_at, "
+                "transcript_url, transcript_type "
                 "FROM podcast_progress WHERE episode_id = ?",
                 (episode_id,),
             ).fetchone()
@@ -327,13 +356,16 @@ class Library:
             "position_ms": row[5],
             "duration_ms": row[6],
             "updated_at": row[7],
+            "transcript_url": row[8] if len(row) > 8 else "",
+            "transcript_type": row[9] if len(row) > 9 else "",
         }
 
     def in_progress_podcasts(self) -> list[dict]:
         with self._lock:
             rows = self._db.execute(
                 "SELECT episode_id, title, artist, artwork, stream_url, "
-                "position_ms, duration_ms, updated_at "
+                "position_ms, duration_ms, updated_at, "
+                "transcript_url, transcript_type "
                 "FROM podcast_progress ORDER BY updated_at DESC"
             ).fetchall()
         return [
@@ -346,6 +378,8 @@ class Library:
                 "position_ms": r[5],
                 "duration_ms": r[6],
                 "updated_at": r[7],
+                "transcript_url": r[8] if len(r) > 8 else "",
+                "transcript_type": r[9] if len(r) > 9 else "",
             }
             for r in rows
         ]

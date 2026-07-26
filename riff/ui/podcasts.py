@@ -379,6 +379,13 @@ class PodcastsPage(Gtk.Box):
                     dur.add_css_class("caption")
                     dur.add_css_class("dim-label")
                     box.append(dur)
+                if ep.transcript_url:
+                    tr = Gtk.Button(label="Transcript")
+                    tr.add_css_class("flat")
+                    tr.connect(
+                        "clicked",
+                        lambda _b, e=ep: self._open_transcript(e))
+                    box.append(tr)
                 row.set_child(box)
                 listbox.append(row)
             host.append(listbox)
@@ -389,3 +396,12 @@ class PodcastsPage(Gtk.Box):
                 "network-error-symbolic", "Couldn't load episodes", str(exc)))
 
         run_async(work, done, fail, name="riff-pod-eps")
+
+    def _open_transcript(self, ep) -> None:
+        from .transcript import open_transcript
+        open_transcript(
+            self.window,
+            url=ep.transcript_url,
+            type_=ep.transcript_type or "",
+            title=ep.title or "",
+        )

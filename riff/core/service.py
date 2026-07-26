@@ -602,6 +602,8 @@ class PlaybackService:
             stream_url=track.stream_url or "",
             position_ms=pos_ms,
             duration_ms=dur_ms,
+            transcript_url=getattr(track, "transcript_url", "") or "",
+            transcript_type=getattr(track, "transcript_type", "") or "",
         )
 
     def _prefetch_next(self) -> None:

@@ -76,4 +76,6 @@ def track_from_progress(row: dict) -> Track | None:
         duration=max(0, dur_ms // 1000),
         thumbnail=str(row.get("artwork") or ""),
         stream_url=url,
+        transcript_url=str(row.get("transcript_url") or ""),
+        transcript_type=str(row.get("transcript_type") or ""),
     )

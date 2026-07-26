@@ -63,6 +63,9 @@ class PodcastEpisode:
     duration_sec: int = 0
     size_bytes: int = 0
     show_title: str = ""
+    transcript_url: str = ""
+    transcript_type: str = ""
+    chapters_url: str = ""
 
     @property
     def episode_id(self) -> str:
@@ -78,6 +81,9 @@ class PodcastEpisode:
             duration=int(self.duration_sec or 0),
             thumbnail=self.artwork or "",
             stream_url=self.stream_url,
+            transcript_url=self.transcript_url or "",
+            transcript_type=self.transcript_type or "",
+            chapters_url=self.chapters_url or "",
         )
 
 
@@ -271,6 +277,9 @@ def parse_episodes(
             ep_art = _attr(item.find(f"{{{_MEDIA}}}thumbnail"), "url")
         if not ep_art:
             ep_art = channel_art
+        chapters_url = _attr(
+            item.find(f"{{{_PODCAST}}}chapters"), "url")
+        transcript_url, transcript_type = _best_transcript(item)
         out.append(PodcastEpisode(
             guid=guid,
             title=title,
@@ -281,10 +290,24 @@ def parse_episodes(
             duration_sec=dur,
             size_bytes=size,
             show_title=show_title,
+            transcript_url=transcript_url,
+            transcript_type=transcript_type,
+            chapters_url=chapters_url,
         ))
         if len(out) >= limit:
             break
     return out
+
+
+def _best_transcript(item: ET.Element) -> tuple[str, str]:
+    from .podcast_transcript import pick_best_transcript
+
+    candidates: list[tuple[str, str]] = []
+    for node in item.findall(f"{{{_PODCAST}}}transcript"):
+        url = _attr(node, "url")
+        if url:
+            candidates.append((url, (_attr(node, "type") or "").lower()))
+    return pick_best_transcript(candidates)
 
 
 def fetch_episodes(

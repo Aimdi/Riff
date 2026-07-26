@@ -171,6 +171,11 @@ class FullPlayer(Gtk.Overlay):
         self._queue_tab.set_active(True)
         switch.append(self._queue_tab)
         switch.append(self._lyrics_tab)
+        self._transcript_btn = Gtk.Button(label="Transcript")
+        self._transcript_btn.add_css_class("pill")
+        self._transcript_btn.set_visible(False)
+        self._transcript_btn.connect("clicked", self._on_transcript)
+        switch.append(self._transcript_btn)
         body.append(switch)
 
         hint = Gtk.Label(label="Queue & lyrics · Esc closes")
@@ -229,6 +234,7 @@ class FullPlayer(Gtk.Overlay):
             self._set_backdrop("")
             self.fav.set_sensitive(False)
             self._menu_btn.set_sensitive(False)
+            self._transcript_btn.set_visible(False)
             self.seek.set_value(0)
             self.pos_label.set_label("0:00")
             self.dur_label.set_label("0:00")
@@ -249,6 +255,21 @@ class FullPlayer(Gtk.Overlay):
             self.fav,
             self.window.library.is_favorite(track.video_id)
             if track.video_id else False,
+        )
+        self._transcript_btn.set_visible(
+            bool(getattr(track, "transcript_url", "") or ""))
+
+    def _on_transcript(self, *_a) -> None:
+        track = self._current
+        url = getattr(track, "transcript_url", "") if track else ""
+        if not track or not url:
+            return
+        from .transcript import open_transcript
+        open_transcript(
+            self.window,
+            url=url,
+            type_=getattr(track, "transcript_type", "") or "",
+            title=track.title or "",
         )
 
     def _on_state(self, state: str) -> None:
