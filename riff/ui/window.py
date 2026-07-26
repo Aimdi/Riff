@@ -37,7 +37,7 @@ from .soulsync import SoulSyncPage
 from .torrents import TorrentsPage
 
 CSS = b"""
-/* Riff Mobile surface language — void black + elevated green */
+/* Riff Mobile surface language - void black + elevated green */
 .riff-full-player {
     background-color: #000000;
 }
@@ -257,7 +257,7 @@ button.riff-cover-link {
     font-size: 17px;
     font-weight: 700;
 }
-/* Home shortcut tiles — elevated chips, green signature (not purple). */
+/* Home shortcut tiles - elevated chips, green signature (not purple). */
 button.riff-shortcut {
     background-color: alpha(#ffffff, 0.06);
     border-radius: 12px;
