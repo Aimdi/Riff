@@ -179,6 +179,57 @@ class SettingsDialog(Adw.PreferencesDialog):
         abs_group.add(self._abs_status)
         page.add(abs_group)
 
+        # -- Cloud (Subsonic-compatible) --------------------------------------
+        cloud_group = Adw.PreferencesGroup()
+        cloud_group.set_title("Cloud music")
+        cloud_group.set_description(
+            "Stream your own collection from Navidrome, OpenSubsonic, "
+            "Airsonic, Gonic, Ampache, or any Subsonic-compatible server.")
+        self._cloud_host = Adw.EntryRow()
+        self._cloud_host.set_title("Server URL")
+        self._cloud_host.set_text(
+            str(config.settings.get("cloud_host", "") or ""))
+        self._cloud_host.set_show_apply_button(True)
+        self._cloud_host.connect("apply", lambda row: self._save(
+            "cloud_host", row.get_text().strip()))
+        cloud_group.add(self._cloud_host)
+        self._cloud_user = Adw.EntryRow()
+        self._cloud_user.set_title("Username")
+        self._cloud_user.set_text(
+            str(config.settings.get("cloud_username", "") or ""))
+        self._cloud_user.set_show_apply_button(True)
+        self._cloud_user.connect("apply", lambda row: self._save(
+            "cloud_username", row.get_text().strip()))
+        cloud_group.add(self._cloud_user)
+        self._cloud_pass = Adw.PasswordEntryRow()
+        self._cloud_pass.set_title("Password")
+        self._cloud_pass.set_text(
+            str(config.settings.get("cloud_password", "") or ""))
+        self._cloud_pass.set_show_apply_button(True)
+        self._cloud_pass.connect("apply", lambda row: self._save(
+            "cloud_password", row.get_text()))
+        cloud_group.add(self._cloud_pass)
+        cloud_ok = bool(
+            config.settings.get("cloud_host")
+            and config.settings.get("cloud_username")
+            and config.settings.get("cloud_password"))
+        self._cloud_status = Adw.ActionRow()
+        self._cloud_status.set_title(
+            "Connected" if cloud_ok else "Not connected")
+        self._cloud_status.set_subtitle(
+            str(config.settings.get("cloud_host", "") or "")
+            if cloud_ok else "Save credentials, then Connect")
+        cloud_btn = Gtk.Button(
+            label="Disconnect" if cloud_ok else "Connect")
+        cloud_btn.set_valign(Gtk.Align.CENTER)
+        if not cloud_ok:
+            cloud_btn.add_css_class("suggested-action")
+        cloud_btn.connect("clicked", self._on_cloud_toggle)
+        self._cloud_status.add_suffix(cloud_btn)
+        self._cloud_connect_btn = cloud_btn
+        cloud_group.add(self._cloud_status)
+        page.add(cloud_group)
+
         # -- scrobbling ---------------------------------------------------------
         scrobble = Adw.PreferencesGroup()
         scrobble.set_title("Scrobbling")
@@ -509,6 +560,61 @@ class SettingsDialog(Adw.PreferencesDialog):
             self.window.toast(f"Audiobookshelf: {exc}")
 
         run_async(work, done, fail, name="riff-abs-login")
+
+    def _on_cloud_toggle(self, _btn) -> None:
+        if (config.settings.get("cloud_host")
+                and config.settings.get("cloud_username")
+                and config.settings.get("cloud_password")
+                and self._cloud_connect_btn.get_label() == "Disconnect"):
+            for key in (
+                "cloud_host", "cloud_username", "cloud_password",
+            ):
+                config.settings.set(key, "")
+            config.settings.set("cloud_legacy_auth", False)
+            self._cloud_host.set_text("")
+            self._cloud_user.set_text("")
+            self._cloud_pass.set_text("")
+            self._cloud_status.set_title("Not connected")
+            self._cloud_status.set_subtitle("Save credentials, then Connect")
+            self._cloud_connect_btn.set_label("Connect")
+            self._cloud_connect_btn.add_css_class("suggested-action")
+            self.window.toast("Cloud disconnected")
+            return
+
+        from ..core import cloud as cloud_mod
+
+        host = self._cloud_host.get_text().strip()
+        user = self._cloud_user.get_text().strip()
+        password = self._cloud_pass.get_text()
+        config.settings.set("cloud_host", host)
+        config.settings.set("cloud_username", user)
+        config.settings.set("cloud_password", password)
+        self._cloud_status.set_subtitle("Connecting…")
+        self._cloud_connect_btn.set_sensitive(False)
+
+        def work():
+            return cloud_mod.login(host, user, password)
+
+        def done(session) -> None:
+            config.settings.set("cloud_host", session.host)
+            config.settings.set("cloud_username", session.username)
+            config.settings.set("cloud_password", session.password)
+            config.settings.set("cloud_legacy_auth", session.legacy_auth)
+            self._cloud_status.set_title("Connected")
+            self._cloud_status.set_subtitle(session.host)
+            self._cloud_connect_btn.set_label("Disconnect")
+            self._cloud_connect_btn.set_sensitive(True)
+            self._cloud_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("Cloud music connected")
+
+        def fail(exc: Exception) -> None:
+            config.settings.set("cloud_password", "")
+            self._cloud_status.set_title("Not connected")
+            self._cloud_status.set_subtitle(str(exc))
+            self._cloud_connect_btn.set_sensitive(True)
+            self.window.toast(f"Cloud: {exc}")
+
+        run_async(work, done, fail, name="riff-cloud-login")
 
     def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
         key = self._theme_keys[row.get_selected()]

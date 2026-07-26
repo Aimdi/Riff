@@ -560,7 +560,7 @@ class PlaybackService:
         if (nxt.stream_url or "").startswith(("http://", "https://")):
             return
         if (nxt.video_id or "").startswith(
-                ("podcast_", "librivox_", "abs_")):
+                ("podcast_", "librivox_", "abs_", "cloud_")):
             return
         if self.resolver.cached(nxt.video_id):
             return
@@ -573,7 +573,7 @@ class PlaybackService:
         if self._radio_pending or not seed.video_id:
             return
         if (seed.video_id or "").startswith(
-                ("podcast_", "librivox_", "abs_")) or (
+                ("podcast_", "librivox_", "abs_", "cloud_")) or (
                 seed.stream_url or "").startswith(("http://", "https://")):
             return
         self._radio_pending = True
@@ -613,7 +613,7 @@ class PlaybackService:
         cur = self.queue.current
         if cur and config.settings.get("autoplay_radio", True) and not (
                 (cur.video_id or "").startswith(
-                    ("podcast_", "librivox_", "abs_"))
+                    ("podcast_", "librivox_", "abs_", "cloud_"))
                 or (cur.stream_url or "").startswith(("http://", "https://"))):
             self._continue_radio_after(cur)
         else:
@@ -621,7 +621,7 @@ class PlaybackService:
 
     def _continue_radio_after(self, last: Track) -> None:
         if (last.video_id or "").startswith(
-                ("podcast_", "librivox_", "abs_")):
+                ("podcast_", "librivox_", "abs_", "cloud_")):
             self._emit(self.state_listeners, STATE_STOPPED)
             return
 

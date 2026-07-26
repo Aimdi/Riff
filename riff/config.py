@@ -52,6 +52,11 @@ DEFAULTS = {
     "abs_token": "",
     "abs_user_id": "",
     "abs_library_id": "",
+    # Cloud — Subsonic-compatible self-hosted music (Navidrome, …).
+    "cloud_host": "",
+    "cloud_username": "",
+    "cloud_password": "",
+    "cloud_legacy_auth": False,
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
     # "mobile" = Riff Mobile shell (rail + mini player + full player);
