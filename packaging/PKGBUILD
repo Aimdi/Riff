@@ -8,7 +8,7 @@
 # the preinstalled AUR helper:   paru -S python-ytmusicapi
 
 pkgname=riff-player
-pkgver=0.22.1
+pkgver=0.23.1
 pkgrel=1
 pkgdesc="Native YouTube Music player (GTK4 + libadwaita + mpv)"
 arch=('any')
@@ -39,15 +39,19 @@ makedepends=(
   'python-setuptools'
 )
 
-# Build from the repository working tree (two directories up).
-_srcdir="$(cd .. && pwd)"
+# Repo root = parent of this packaging/ directory.
+# IMPORTANT: use $startdir (set by makepkg), not bare `cd ..`.
+# makepkg re-sources PKGBUILD after pkgver() with cwd=$srcdir, so
+# `_srcdir="$(cd .. && pwd)"` would resolve to packaging/ and break build().
+_pkgroot="${startdir:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+_repodir="$(cd "$_pkgroot/.." && pwd)"
 
 pkgver() {
-  grep -oP '(?<=^__version__ = ")[^"]+' "$_srcdir/riff/__init__.py"
+  grep -oP '(?<=^__version__ = ")[^"]+' "$_repodir/riff/__init__.py"
 }
 
 build() {
-  cd "$_srcdir"
+  cd "$_repodir"
   # Clean stale wheels from previous builds — package() globs this
   # directory, and two wheels would collide on the same installed files.
   rm -rf "$srcdir/dist"
@@ -58,12 +62,12 @@ package() {
   python -m installer --destdir="$pkgdir" \
     "$srcdir"/dist/riff_player-*-py3-none-any.whl
 
-  install -Dm644 "$_srcdir/data/io.github.aimdi.Riff.desktop" \
+  install -Dm644 "$_repodir/data/io.github.aimdi.Riff.desktop" \
     "$pkgdir/usr/share/applications/io.github.aimdi.Riff.desktop"
-  install -Dm644 "$_srcdir/data/io.github.aimdi.Riff.svg" \
+  install -Dm644 "$_repodir/data/io.github.aimdi.Riff.svg" \
     "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.aimdi.Riff.svg"
-  install -Dm755 "$_srcdir/packaging/riff-update" \
+  install -Dm755 "$_repodir/packaging/riff-update" \
     "$pkgdir/usr/bin/riff-update"
-  install -Dm644 "$_srcdir/LICENSE" \
+  install -Dm644 "$_repodir/LICENSE" \
     "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

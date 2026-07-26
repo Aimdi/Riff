@@ -15,10 +15,22 @@ FORCE=0
 echo "==> Fetching latest Riff…"
 if [ -d "$SRC/.git" ]; then
     git -C "$SRC" fetch --quiet origin
-    git -C "$SRC" reset --quiet --hard origin/HEAD
+    # Prefer the remote HEAD (default branch); fall back to FETCH_HEAD tip.
+    if git -C "$SRC" rev-parse --verify --quiet origin/HEAD >/dev/null; then
+        git -C "$SRC" reset --quiet --hard origin/HEAD
+    else
+        git -C "$SRC" remote set-head origin -a >/dev/null 2>&1 || true
+        git -C "$SRC" reset --quiet --hard origin/HEAD
+    fi
 else
     mkdir -p "$(dirname "$SRC")"
     git clone --quiet --depth 1 "$REPO" "$SRC"
+fi
+
+if [ ! -f "$SRC/pyproject.toml" ] || [ ! -f "$SRC/packaging/PKGBUILD" ]; then
+    echo "Update clone at $SRC looks incomplete (missing pyproject.toml)." >&2
+    echo "Remove it and retry:  rm -rf \"$SRC\" && riff-update" >&2
+    exit 1
 fi
 
 NEW_VERSION=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$SRC/riff/__init__.py")
@@ -32,7 +44,10 @@ fi
 
 if command -v pacman >/dev/null && pacman -Q riff-player >/dev/null 2>&1; then
     echo "==> Rebuilding pacman package (makepkg will ask for sudo)…"
+    # Run from packaging/; PKGBUILD resolves the repo root via $startdir/..
     cd "$SRC/packaging"
+    # Drop stale src/ leftovers from a previous failed build.
+    rm -rf src pkg
     makepkg -si --noconfirm
 elif [ -x "${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv/bin/pip" ]; then
     VENV="${XDG_DATA_HOME:-$HOME/.local/share}/riff-venv"
