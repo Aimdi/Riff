@@ -69,11 +69,51 @@ def fresh_finds(
     )
 
 
+def daily_mixes(
+    engine: DiscoveryEngine,
+    *,
+    mix_count: int = 3,
+    tracks_per: int = 16,
+) -> list[tuple[str, str, list[Track]]]:
+    """Lightweight Daily Mixes — one mix per taste seed cluster (mobile MFY)."""
+    from .suggestions import taste_seeds
+
+    library = engine.library
+    seeds = taste_seeds(library, limit=mix_count * 2)
+    if len(seeds) < 2:
+        return []
+    out: list[tuple[str, str, list[Track]]] = []
+    used: set[str] = {t.video_id for t in seeds}
+    for i, seed in enumerate(seeds[:mix_count], start=1):
+        candidates = [
+            (t, 1.0) for t in engine.related_cached(seed.video_id)[:20]]
+        candidates += [
+            (t, 0.9) for t in engine._cooccurrence_candidates(seed.video_id)[:10]]
+        ranked = engine.rank(
+            candidates,
+            surface=f"daily_mix_{i}",
+            limit=tracks_per,
+            max_per_artist=2,
+            exclude=used,
+            exploration=min(0.55, max(0.25, engine.exploration())),
+        )
+        if len(ranked) < 6:
+            continue
+        used.update(t.video_id for t in ranked)
+        artist = (seed.artists or ["Your taste"])[0]
+        title = f"Daily Mix {i}"
+        if artist:
+            title = f"Daily Mix {i} · {artist}"
+        out.append((f"daily_mix_{i}", title, ranked))
+    return out
+
+
 def assemble_home_mix_rows(
     *,
     rediscover: list[Track],
     fresh: list[Track],
-    max_rows: int = 2,
+    daily: list[tuple[str, str, list[Track]]] | None = None,
+    max_rows: int = 4,
     min_count: int = 4,
 ) -> list[tuple[str, str, list[Track]]]:
     """Pick up to ``max_rows`` personal mix strips (mobile Zone-B spirit).
@@ -93,7 +133,9 @@ def assemble_home_mix_rows(
         used.update(t.video_id for t in picked)
         rows.append((section_id, title, picked))
 
-    # Prefer Rediscover first (local-only, always snappy), then Fresh Finds.
+    # Daily Mix leads first (flagship), then Rediscover, then Fresh Finds.
+    for sid, title, tracks in daily or []:
+        take(sid, title, tracks)
     take("rediscover", "Rediscover", rediscover)
     take("fresh_finds", "Fresh Finds", fresh)
     return rows

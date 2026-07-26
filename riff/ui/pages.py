@@ -202,6 +202,27 @@ class HomePage(ContentPage):
             tiles.append(("Liked Songs", None, "♥",
                           lambda: window.goto("favorites")))
 
+        # Riff Mobile shortcut destinations for personal mixes.
+        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
+            from ..core.mixes import load_cached_home_mixes
+
+            for sid, title, tracks in load_cached_home_mixes(window.library):
+                if len(tiles) >= 8:
+                    break
+                if sid.startswith("daily_mix") or sid in (
+                        "rediscover", "fresh_finds"):
+                    short = {
+                        "rediscover": "Rediscover",
+                        "fresh_finds": "Fresh Finds",
+                    }.get(sid, title.split("·")[0].strip())
+                    tiles.append((
+                        short,
+                        [t.thumbnail for t in tracks[:8]],
+                        None,
+                        lambda ts=list(tracks): window.service.play_tracks(
+                            ts, start=0, source=sid),
+                    ))
+
         seen_names = set()
         ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
         if ai_pid is not None:
@@ -451,12 +472,18 @@ class HomePage(ContentPage):
         def work():
             red = mixes_mod.rediscover_tracks(win.library)
             fresh: list[Track] = []
+            daily: list = []
             try:
                 fresh = mixes_mod.fresh_finds(win.service.discovery, limit=24)
             except Exception:  # noqa: BLE001
                 log.exception("fresh finds failed")
+            try:
+                daily = mixes_mod.daily_mixes(win.service.discovery, mix_count=3)
+            except Exception:  # noqa: BLE001
+                log.exception("daily mixes failed")
             rows = mixes_mod.assemble_home_mix_rows(
-                rediscover=red, fresh=fresh, max_rows=2, min_count=4)
+                rediscover=red, fresh=fresh, daily=daily,
+                max_rows=4, min_count=4)
             if rows:
                 mixes_mod.store_home_mixes(win.library, rows)
             return rows
@@ -539,8 +566,11 @@ class HomePage(ContentPage):
 
         def done(items) -> None:
             if items and top is self._top:
-                top.append(Carousel(
-                    "New from artists you follow", items, self.window))
+                title = (
+                    "Release Radar" if str(config.settings.get(
+                        "shell_layout", "mobile")) == "mobile"
+                    else "New from artists you follow")
+                top.append(Carousel(title, items, self.window))
 
         run_async(work, done, lambda _e: None, name="riff-follows")
 

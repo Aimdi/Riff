@@ -5,6 +5,7 @@ import time
 from riff.core.library import Library
 from riff.core.mixes import (
     assemble_home_mix_rows,
+    daily_mixes,
     fresh_finds,
     load_cached_home_mixes,
     rediscover_tracks,
@@ -53,14 +54,39 @@ def test_rediscover_finds_quiet_high_play_tracks():
 def test_assemble_home_mix_rows_caps_and_dedupes():
     red = [_track(i) for i in range(6)]
     fresh = [_track(i) for i in range(3, 12)]  # overlaps v3..v5
+    daily = [("daily_mix_1", "Daily Mix 1", [_track(i) for i in range(20, 28)])]
     rows = assemble_home_mix_rows(
-        rediscover=red, fresh=fresh, max_rows=2, min_count=4)
-    assert len(rows) == 2
-    assert rows[0][0] == "rediscover"
-    assert rows[1][0] == "fresh_finds"
-    red_ids = {t.video_id for t in rows[0][2]}
-    fresh_ids = {t.video_id for t in rows[1][2]}
-    assert not (red_ids & fresh_ids)
+        rediscover=red, fresh=fresh, daily=daily, max_rows=3, min_count=4)
+    assert len(rows) == 3
+    assert rows[0][0] == "daily_mix_1"
+    assert rows[1][0] == "rediscover"
+    assert rows[2][0] == "fresh_finds"
+    ids = [{t.video_id for t in r[2]} for r in rows]
+    assert not (ids[0] & ids[1])
+    assert not (ids[1] & ids[2])
+
+
+def test_daily_mixes_from_taste_seeds():
+    lib = Library(":memory:")
+    try:
+        for i in range(6):
+            for _ in range(3):
+                lib.record_play(_track(i, artist=f"Art{i}"))
+
+        class FakeApi:
+            def related_songs(self, video_id):
+                n = int(video_id[1:])
+                return [_track(100 + n * 10 + j, artist=f"Rel{n}")
+                        for j in range(12)]
+
+        from riff.core.discovery import DiscoveryEngine
+
+        mixes = daily_mixes(DiscoveryEngine(lib, FakeApi()), mix_count=2)
+        assert mixes
+        assert mixes[0][0].startswith("daily_mix_")
+        assert len(mixes[0][2]) >= 6
+    finally:
+        lib.close()
 
 
 def test_fresh_finds_uses_unheard_related():
