@@ -57,6 +57,9 @@ DEFAULTS = {
     "cloud_username": "",
     "cloud_password": "",
     "cloud_legacy_auth": False,
+    # SoulSync plugin (self-hosted search → download).
+    "soulsync_host": "",
+    "soulsync_api_key": "",
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
     # "mobile" = Riff Mobile shell (rail + mini player + full player);

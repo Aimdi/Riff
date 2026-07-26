@@ -32,6 +32,7 @@ from .cloud import CloudPage
 from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
 from .podcasts import PodcastsPage
+from .soulsync import SoulSyncPage
 
 CSS = b"""
 /* Riff Mobile surface language on desktop */
@@ -243,6 +244,7 @@ SIDEBAR_ITEMS = [
     ("podcasts", "Podcasts", "emblem-music-symbolic"),
     ("audiobooks", "Audiobooks", "media-optical-symbolic"),
     ("cloud", "Cloud", "network-server-symbolic"),
+    ("soulsync", "SoulSync", "folder-download-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
     ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
@@ -301,6 +303,7 @@ class MainWindow(Adw.ApplicationWindow):
             "podcasts": PodcastsPage(self),
             "audiobooks": AudiobooksPage(self),
             "cloud": CloudPage(self),
+            "soulsync": SoulSyncPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)

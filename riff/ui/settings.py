@@ -230,6 +230,47 @@ class SettingsDialog(Adw.PreferencesDialog):
         cloud_group.add(self._cloud_status)
         page.add(cloud_group)
 
+        # -- SoulSync plugin --------------------------------------------------
+        ss_group = Adw.PreferencesGroup()
+        ss_group.set_title("SoulSync")
+        ss_group.set_description(
+            "Optional plugin: search and queue downloads on a self-hosted "
+            "SoulSync server (Bearer API key).")
+        self._ss_host = Adw.EntryRow()
+        self._ss_host.set_title("Server URL")
+        self._ss_host.set_text(
+            str(config.settings.get("soulsync_host", "") or ""))
+        self._ss_host.set_show_apply_button(True)
+        self._ss_host.connect("apply", lambda row: self._save(
+            "soulsync_host", row.get_text().strip()))
+        ss_group.add(self._ss_host)
+        self._ss_key = Adw.PasswordEntryRow()
+        self._ss_key.set_title("API key")
+        self._ss_key.set_text(
+            str(config.settings.get("soulsync_api_key", "") or ""))
+        self._ss_key.set_show_apply_button(True)
+        self._ss_key.connect("apply", lambda row: self._save(
+            "soulsync_api_key", row.get_text()))
+        ss_group.add(self._ss_key)
+        ss_ok = bool(
+            config.settings.get("soulsync_host")
+            and config.settings.get("soulsync_api_key"))
+        self._ss_status = Adw.ActionRow()
+        self._ss_status.set_title(
+            "Connected" if ss_ok else "Not connected")
+        self._ss_status.set_subtitle(
+            str(config.settings.get("soulsync_host", "") or "")
+            if ss_ok else "Save URL + key, then Connect")
+        ss_btn = Gtk.Button(label="Disconnect" if ss_ok else "Connect")
+        ss_btn.set_valign(Gtk.Align.CENTER)
+        if not ss_ok:
+            ss_btn.add_css_class("suggested-action")
+        ss_btn.connect("clicked", self._on_soulsync_toggle)
+        self._ss_status.add_suffix(ss_btn)
+        self._ss_connect_btn = ss_btn
+        ss_group.add(self._ss_status)
+        page.add(ss_group)
+
         # -- scrobbling ---------------------------------------------------------
         scrobble = Adw.PreferencesGroup()
         scrobble.set_title("Scrobbling")
@@ -615,6 +656,52 @@ class SettingsDialog(Adw.PreferencesDialog):
             self.window.toast(f"Cloud: {exc}")
 
         run_async(work, done, fail, name="riff-cloud-login")
+
+    def _on_soulsync_toggle(self, _btn) -> None:
+        if (config.settings.get("soulsync_host")
+                and config.settings.get("soulsync_api_key")
+                and self._ss_connect_btn.get_label() == "Disconnect"):
+            config.settings.set("soulsync_host", "")
+            config.settings.set("soulsync_api_key", "")
+            self._ss_host.set_text("")
+            self._ss_key.set_text("")
+            self._ss_status.set_title("Not connected")
+            self._ss_status.set_subtitle("Save URL + key, then Connect")
+            self._ss_connect_btn.set_label("Connect")
+            self._ss_connect_btn.add_css_class("suggested-action")
+            self.window.toast("SoulSync disconnected")
+            return
+
+        from ..core import soulsync as ss_mod
+
+        host = self._ss_host.get_text().strip()
+        key = self._ss_key.get_text().strip()
+        config.settings.set("soulsync_host", host)
+        config.settings.set("soulsync_api_key", key)
+        self._ss_status.set_subtitle("Connecting…")
+        self._ss_connect_btn.set_sensitive(False)
+
+        def work():
+            return ss_mod.connect(host, key)
+
+        def done(session) -> None:
+            config.settings.set("soulsync_host", session.host)
+            config.settings.set("soulsync_api_key", session.api_key)
+            self._ss_status.set_title("Connected")
+            self._ss_status.set_subtitle(session.host)
+            self._ss_connect_btn.set_label("Disconnect")
+            self._ss_connect_btn.set_sensitive(True)
+            self._ss_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("SoulSync connected")
+
+        def fail(exc: Exception) -> None:
+            config.settings.set("soulsync_api_key", "")
+            self._ss_status.set_title("Not connected")
+            self._ss_status.set_subtitle(str(exc))
+            self._ss_connect_btn.set_sensitive(True)
+            self.window.toast(f"SoulSync: {exc}")
+
+        run_async(work, done, fail, name="riff-ss-connect")
 
     def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
         key = self._theme_keys[row.get_selected()]
