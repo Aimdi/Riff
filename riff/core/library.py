@@ -995,6 +995,19 @@ class Library:
             ).fetchall()
         return [Track.from_dict(json.loads(r[0])) for r in rows]
 
+    def playlist_thumbnails(
+        self, playlist_id: int, limit: int = 8,
+    ) -> list[str]:
+        """Thumbnail URLs only — cheaper than hydrating full Track objects."""
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT json_extract(track_json, '$.thumbnail') "
+                "FROM playlist_items WHERE playlist_id = ? "
+                "ORDER BY position LIMIT ?",
+                (playlist_id, max(1, int(limit))),
+            ).fetchall()
+        return [str(r[0]) for r in rows if r[0]]
+
     def find_playlist(self, name: str) -> int | None:
         with self._lock:
             row = self._db.execute(

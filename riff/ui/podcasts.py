@@ -516,18 +516,28 @@ class PodcastsPage(Gtk.Box):
             return
 
         def work():
+            from concurrent.futures import ThreadPoolExecutor, as_completed
+
             from ..core.podcast import fetch_episodes
-            buckets: list[list] = []
-            for row in subs[:12]:
+
+            rows = list(subs[:12])
+
+            def one(row: dict):
                 try:
-                    eps = fetch_episodes(
+                    return fetch_episodes(
                         row["feed_url"],
                         show_title=row.get("title") or "",
                         artwork=row.get("artwork") or "",
                         limit=3)
-                    buckets.append(eps)
                 except Exception:  # noqa: BLE001
-                    continue
+                    return []
+
+            buckets: list[list] = [[] for _ in rows]
+            # Parallel RSS — hub paint was sequential (~12× feed latency).
+            with ThreadPoolExecutor(max_workers=min(6, len(rows) or 1)) as pool:
+                futs = {pool.submit(one, row): i for i, row in enumerate(rows)}
+                for fut in as_completed(futs):
+                    buckets[futs[fut]] = fut.result() or []
             # Round-robin newest-first per show.
             merged = []
             i = 0

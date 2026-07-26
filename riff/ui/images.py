@@ -6,6 +6,7 @@ import hashlib
 import logging
 import os
 import urllib.request
+from collections import OrderedDict
 
 from gi.repository import Gdk
 
@@ -15,8 +16,17 @@ from ..util import run_async
 
 log = logging.getLogger("riff.images")
 
-_memory: dict[str, Gdk.Texture] = {}
+# LRU texture cache — previously wiped entirely at the limit (janky thrash).
+_memory: OrderedDict[str, Gdk.Texture] = OrderedDict()
 _MEMORY_LIMIT = 256
+
+
+def _cache_put(key: str, texture: Gdk.Texture) -> None:
+    if key in _memory:
+        _memory.move_to_end(key)
+    _memory[key] = texture
+    while len(_memory) > _MEMORY_LIMIT:
+        _memory.popitem(last=False)
 
 
 def _cache_path(url: str) -> str:
@@ -40,6 +50,7 @@ def load_texture(url: str, size: int, callback) -> None:
     url = upscale_thumbnail(url, size)
     tex = _memory.get(url)
     if tex is not None:
+        _memory.move_to_end(url)
         callback(tex)
         return
 
@@ -72,9 +83,7 @@ def load_texture(url: str, size: int, callback) -> None:
 
     def done(texture: Gdk.Texture | None) -> None:
         if texture is not None:
-            if len(_memory) > _MEMORY_LIMIT:
-                _memory.clear()
-            _memory[url] = texture
+            _cache_put(url, texture)
         callback(texture)
 
     def error(exc: Exception) -> None:
@@ -102,6 +111,7 @@ def load_collage(urls: list[str], size: int, callback) -> None:
     key = "collage:" + "|".join(quad) + f":{size}"
     tex = _memory.get(key)
     if tex is not None:
+        _memory.move_to_end(key)
         callback(tex)
         return
 
@@ -138,9 +148,7 @@ def load_collage(urls: list[str], size: int, callback) -> None:
 
     def done(texture: Gdk.Texture | None) -> None:
         if texture is not None:
-            if len(_memory) > _MEMORY_LIMIT:
-                _memory.clear()
-            _memory[key] = texture
+            _cache_put(key, texture)
         callback(texture)
 
     def error(exc: Exception) -> None:

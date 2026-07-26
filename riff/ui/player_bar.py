@@ -350,7 +350,12 @@ class PlayerBar(Gtk.Box):
         self._current = track
         if track is None:
             self.title_label.set_label("Not playing")
-            self.artist_label.set_label("")
+            # Empty mini-strip looked dead in live testing — nudge toward Home.
+            hint = "Start Wave or search"
+            if getattr(self, "_mobile_compact", False):
+                self.artist_label.set_label(hint)
+            else:
+                self.artist_label.set_label(hint)
             self.art.set_url("")
             self.seek_scale.set_value(0)
             self.pos_label.set_label("0:00")

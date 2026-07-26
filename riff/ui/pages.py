@@ -178,17 +178,20 @@ class HomePage(ContentPage):
         if name:
             text = f"{text}, {name.split()[0]}"
         label = Gtk.Label(label=text)
-        label.add_css_class("title-1")
         label.set_xalign(0.0)
         # Riff Mobile Home leads with Discover under the greeting.
         if str(config.settings.get("shell_layout", "mobile")) == "mobile":
-            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            label.add_css_class("title-3")
+            label.add_css_class("riff-greeting")
+            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            wrap.set_margin_bottom(6)
             wrap.append(label)
             discover = Gtk.Label(label="Discover")
             discover.add_css_class("title-1")
             discover.set_xalign(0.0)
             wrap.append(discover)
             return wrap
+        label.add_css_class("title-1")
         return label
 
     def _shortcut_grid(self) -> Gtk.Widget | None:
@@ -215,42 +218,50 @@ class HomePage(ContentPage):
                 else:
                     window.goto(fallback_page)
 
+            recent_thumbs = [
+                t.thumbnail for t in window.library.recent(8) if t.thumbnail]
+            fresh_thumbs = [
+                t.thumbnail for t in (mix_map.get("fresh_finds") or [])[:8]
+                if t.thumbnail]
+            redis_thumbs = [
+                t.thumbnail for t in (mix_map.get("rediscover") or [])[:8]
+                if t.thumbnail]
+            radar_thumbs = [t.thumbnail for t in (radar or [])[:8] if t.thumbnail]
+            # Glyph fallbacks when caches are empty — live testing showed
+            # identical list placeholders making the Discover grid unreadable.
             tiles = [
-                ("Favorites", None, "♥",
+                ("Favorites", None, "♥", "riff-liked-tile",
                  lambda: window.goto("favorites")),
-                ("Recently played",
-                 [t.thumbnail for t in window.library.recent(8)], None,
+                ("Recently played", recent_thumbs or None,
+                 "◷" if not recent_thumbs else None, "riff-tile-recent",
                  lambda: window.goto("history")),
-                ("Fresh Finds",
-                 [t.thumbnail for t in (mix_map.get("fresh_finds") or [])[:8]],
-                 None,
+                ("Fresh Finds", fresh_thumbs or None,
+                 "✦" if not fresh_thumbs else None, "riff-tile-fresh",
                  lambda: _play_or_goto(
                      mix_map.get("fresh_finds"), "explore", "fresh_finds")),
-                ("Rediscover",
-                 [t.thumbnail for t in (mix_map.get("rediscover") or [])[:8]],
-                 None,
+                ("Rediscover", redis_thumbs or None,
+                 "↺" if not redis_thumbs else None, "riff-tile-rediscover",
                  lambda: _play_or_goto(
                      mix_map.get("rediscover"), "favorites", "rediscover")),
-                ("Release Radar",
-                 [t.thumbnail for t in (radar or [])[:8]], None,
+                ("Release Radar", radar_thumbs or None,
+                 "◎" if not radar_thumbs else None, "riff-tile-radar",
                  lambda: _play_or_goto(radar, "artists", "release_radar")),
-                ("Downloads", None, "↓",
+                ("Downloads", None, "↓", "riff-liked-tile",
                  lambda: window.goto("downloads")),
             ]
         else:
             n_favs = len(window.library.favorites())
             if n_favs:
-                tiles.append(("Liked Songs", None, "♥",
+                tiles.append(("Liked Songs", None, "♥", "riff-liked-tile",
                               lambda: window.goto("favorites")))
             seen_names = set()
             ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
             if ai_pid is not None:
-                tracks = window.library.playlist_tracks(ai_pid)
-                if tracks:
+                thumbs = window.library.playlist_thumbnails(ai_pid, 8)
+                if thumbs:
                     seen_names.add(AI_MIX_PLAYLIST)
                     tiles.append((
-                        AI_MIX_PLAYLIST,
-                        [t.thumbnail for t in tracks[:8]], None,
+                        AI_MIX_PLAYLIST, thumbs, None, "",
                         lambda p=ai_pid: window.open_local_playlist(
                             p, AI_MIX_PLAYLIST)))
             for item in window.library.playlist_tree():
@@ -264,17 +275,21 @@ class HomePage(ContentPage):
                     if name in seen_names:
                         continue
                     seen_names.add(name)
-                    tracks = window.library.playlist_tracks(pid)
-                    if not tracks:
+                    thumbs = window.library.playlist_thumbnails(pid, 8)
+                    if not thumbs:
                         continue
                     tiles.append((
-                        name, [t.thumbnail for t in tracks[:8]], None,
+                        name, thumbs, None, "",
                         lambda p=pid, n=name: window.open_local_playlist(p, n)))
             if len(tiles) < 8:
                 recent = window.library.recent(1)
                 if recent:
-                    tiles.append(("Recently played", [
-                        t.thumbnail for t in window.library.recent(8)], None,
+                    thumbs = [
+                        t.thumbnail for t in window.library.recent(8)
+                        if t.thumbnail]
+                    tiles.append((
+                        "Recently played", thumbs or None,
+                        "◷" if not thumbs else None, "riff-tile-recent",
                         lambda: window.goto("history")))
 
         if not tiles:
@@ -287,8 +302,9 @@ class HomePage(ContentPage):
         grid.set_max_children_per_line(3 if mobile else 4)
         grid.set_column_spacing(10)
         grid.set_row_spacing(10)
-        for title, cover, glyph, cb in tiles[:8]:
-            grid.append(self._shortcut_tile(title, cover, glyph, cb))
+        for title, cover, glyph, style, cb in tiles[:8]:
+            grid.append(self._shortcut_tile(
+                title, cover, glyph, cb, tile_style=style))
         return grid
 
     def _riff_wave_hero(self) -> Gtk.Widget:
@@ -310,14 +326,29 @@ class HomePage(ContentPage):
         card.append(sub)
 
         moods = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        for label, value in (
-            ("Familiar", 0.15), ("Balanced", 0.5), ("Adventurous", 0.85),
-        ):
-            btn = Gtk.Button(label=label)
+        try:
+            current = float(config.settings.get("exploration", 0.3) or 0.3)
+        except (TypeError, ValueError):
+            current = 0.3
+        # Nearest mood wins as the checked toggle.
+        options = (("Familiar", 0.15), ("Balanced", 0.5), ("Adventurous", 0.85))
+        nearest = min(options, key=lambda ov: abs(ov[1] - current))[0]
+        group: Gtk.ToggleButton | None = None
+        for label, value in options:
+            btn = Gtk.ToggleButton(label=label)
             btn.add_css_class("pill")
-            btn.connect(
-                "clicked",
-                lambda _b, v=value: config.settings.set("exploration", v))
+            btn.add_css_class("riff-wave-mood")
+            if group is None:
+                group = btn
+            else:
+                btn.set_group(group)
+            btn.set_active(label == nearest)
+
+            def _pick(_b, v=value) -> None:
+                if _b.get_active():
+                    config.settings.set("exploration", v)
+
+            btn.connect("toggled", _pick)
             moods.append(btn)
         card.append(moods)
 
@@ -353,18 +384,23 @@ class HomePage(ContentPage):
         run_async(work, done, fail, name="riff-wave")
         _ = play_btn
 
-    def _shortcut_tile(self, title: str, cover, glyph, callback):
+    def _shortcut_tile(
+        self, title: str, cover, glyph, callback, *, tile_style: str = "",
+    ):
         btn = Gtk.Button()
         btn.add_css_class("riff-shortcut")
         btn.connect("clicked", lambda *_: callback())
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        if glyph:
-            tile = Gtk.Label(label=glyph)
+        urls = [u for u in (cover or []) if u]
+        if glyph or not urls:
+            tile = Gtk.Label(label=glyph or "♪")
             tile.add_css_class("riff-liked-tile")
+            if tile_style:
+                tile.add_css_class(tile_style)
             tile.set_size_request(56, 56)
         else:
             tile = CoverArt(56, icon="view-list-symbolic")
-            tile.set_urls(cover or [])
+            tile.set_urls(urls)
         row.append(tile)
         label = Gtk.Label(label=title)
         label.add_css_class("heading")

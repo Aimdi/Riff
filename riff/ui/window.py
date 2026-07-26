@@ -209,6 +209,7 @@ button.riff-shortcut {
     border-radius: 8px;
     padding: 0;
     min-height: 56px;
+    transition: background-color 120ms ease;
 }
 button.riff-shortcut:hover {
     background-color: alpha(currentColor, 0.15);
@@ -218,6 +219,26 @@ button.riff-shortcut:hover {
     border-radius: 8px;
     color: #ffffff;
     font-size: 20px;
+}
+.riff-tile-recent {
+    background: linear-gradient(135deg, #1f6feb, #58a6ff);
+}
+.riff-tile-fresh {
+    background: linear-gradient(135deg, #0d9488, #2dd4bf);
+}
+.riff-tile-rediscover {
+    background: linear-gradient(135deg, #b45309, #f59e0b);
+}
+.riff-tile-radar {
+    background: linear-gradient(135deg, #be123c, #fb7185);
+}
+.riff-greeting {
+    opacity: 0.72;
+    font-weight: 500;
+}
+button.riff-wave-mood:checked {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
 }
 /* Spotify-style hover play button on cards. */
 button.riff-card-play {
@@ -317,6 +338,8 @@ class MainWindow(Adw.ApplicationWindow):
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(140)
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
 
@@ -795,21 +818,37 @@ class MainWindow(Adw.ApplicationWindow):
 
     def reload_sidebar_playlists(self) -> None:
         """Fill the sidebar with folders, local playlists, and (when signed
-        in) the account's YouTube Music playlists."""
+        in) the account's YouTube Music playlists.
 
+        Debounced — playlist edits often fire several reloads in a burst.
+        """
+        self._sidebar_reload_gen = getattr(self, "_sidebar_reload_gen", 0) + 1
+        gen = self._sidebar_reload_gen
+
+        def kick() -> bool:
+            if gen != self._sidebar_reload_gen:
+                return False
+            self._reload_sidebar_playlists_now()
+            return False
+
+        try:
+            from gi.repository import GLib
+            GLib.timeout_add(80, kick)
+        except Exception:  # noqa: BLE001
+            self._reload_sidebar_playlists_now()
+
+    def _reload_sidebar_playlists_now(self) -> None:
         def work():
             tree = self.library.playlist_tree()
             covers: dict[int, list] = {}
-            # Up to 8 thumbnails per playlist: set_urls dedupes and builds a
-            # 2x2 collage when 4 distinct covers exist (Snowify-style).
+            # Thumbnails only — avoid hydrating full Track lists for art.
             for item in tree:
                 if item["kind"] == "playlist":
-                    tracks = self.library.playlist_tracks(item["id"])
-                    covers[item["id"]] = [t.thumbnail for t in tracks[:8]]
+                    covers[item["id"]] = self.library.playlist_thumbnails(
+                        item["id"], 8)
                 else:
                     for pid, _n, _c in item["playlists"]:
-                        tracks = self.library.playlist_tracks(pid)
-                        covers[pid] = [t.thumbnail for t in tracks[:8]]
+                        covers[pid] = self.library.playlist_thumbnails(pid, 8)
             try:
                 remote = self.api.library_playlists()
             except Exception:  # noqa: BLE001 — sidebar must never fail hard
@@ -1774,7 +1813,18 @@ class MainWindow(Adw.ApplicationWindow):
     def show_settings(self) -> None:
         from .settings import SettingsDialog
 
-        SettingsDialog(self).present(self)
+        # Rebuild only when closed — opening Preferences was rebuilding the
+        # entire Adw tree (including banned-song list) on every click.
+        dlg = getattr(self, "_settings_dialog", None)
+        if dlg is None:
+            dlg = SettingsDialog(self)
+            self._settings_dialog = dlg
+
+            def _clear(*_a):
+                self._settings_dialog = None
+
+            dlg.connect("closed", _clear)
+        dlg.present(self)
 
     def _ai_provider_config(self, interactive: bool) -> dict | None:
         from ..core import local_ai
