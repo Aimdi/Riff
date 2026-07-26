@@ -50,6 +50,12 @@ class Track:
     duration: int = 0  # seconds
     thumbnail: str = ""
     local_path: str = ""  # set when downloaded for offline playback
+    # Direct HTTP(S) audio (podcast enclosures, etc.) — skips yt-dlp.
+    stream_url: str = ""
+    # Podcasting 2.0 extras (optional).
+    transcript_url: str = ""
+    transcript_type: str = ""
+    chapters_url: str = ""
 
     @property
     def artist(self) -> str:
@@ -74,6 +80,10 @@ class Track:
             duration=int(d.get("duration") or 0),
             thumbnail=d.get("thumbnail", "") or "",
             local_path=d.get("local_path", "") or "",
+            stream_url=d.get("stream_url", "") or "",
+            transcript_url=d.get("transcript_url", "") or "",
+            transcript_type=d.get("transcript_type", "") or "",
+            chapters_url=d.get("chapters_url", "") or "",
         )
 
     @classmethod

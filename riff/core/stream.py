@@ -3,10 +3,32 @@
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 
 log = logging.getLogger("riff.stream")
+
+_YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_YT_URL_RE = re.compile(
+    r"(?:v=|/v/|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})"
+)
+
+
+def extract_youtube_video_id(text: str) -> str | None:
+    """Parse a bare video id or YouTube / Music URL → 11-char id."""
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    # Riff synthetic ids (podcasts, ABS, …) must never look like YouTube.
+    if raw.startswith((
+        "podcast_", "librivox_", "abs_", "cloud_", "local_",
+    )):
+        return None
+    if _YT_ID_RE.fullmatch(raw):
+        return raw
+    m = _YT_URL_RE.search(raw)
+    return m.group(1) if m else None
 
 # Direct googlevideo URLs expire after ~6 hours; keep a conservative margin.
 CACHE_TTL = 30 * 60
@@ -46,13 +68,20 @@ class StreamResolver:
             self._cache.pop(key, None)
         return None
 
+    def invalidate(self, video_id: str) -> None:
+        """Drop cached URLs for a video (Meld: recover before skip)."""
+        with self._lock:
+            for kind in ("audio", "video"):
+                self._cache.pop((video_id, kind), None)
+
     # Tried in order until one yields a stream. YouTube regularly breaks
     # individual player clients (PO-token requirements etc.), so never rely
     # on a single pinned client: yt-dlp's own defaults come first — its
     # maintainers update them as YouTube changes — with explicit clients as
-    # fallbacks.
+    # fallbacks. ``android_vr`` is Meld/Vivi's preferred low-gate client.
     _CLIENT_ATTEMPTS: tuple[tuple[str, ...] | None, ...] = (
         None,                    # yt-dlp defaults
+        ("android_vr", "android"),
         ("android", "web"),      # historic riff behavior
         ("web_music", "ios"),    # music-specific / least-gated alternates
     )

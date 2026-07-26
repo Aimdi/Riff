@@ -26,9 +26,153 @@ from .pages import (
     StatsPage,
 )
 from . import iconutil
+from .full_player import FullPlayer
+from .audiobooks import AudiobooksPage
+from .cloud import CloudPage
+from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
+from .podcasts import PodcastsPage
+from .seeker import SeekerPage
+from .soulsync import SoulSyncPage
+from .torrents import TorrentsPage
 
 CSS = b"""
+/* Riff Mobile surface language - void black + elevated green */
+.riff-full-player {
+    background-color: #000000;
+}
+.riff-full-player-backdrop {
+    opacity: 0.68;
+}
+.riff-full-player-scrim {
+    background: linear-gradient(
+        180deg,
+        alpha(#000000, 0.28) 0%,
+        alpha(#000000, 0.55) 40%,
+        alpha(#000000, 0.92) 100%);
+}
+.riff-lyric-word {
+    opacity: 0.42;
+}
+.riff-lyric-word-done {
+    opacity: 0.78;
+}
+.riff-lyric-word-active {
+    opacity: 1.0;
+    color: @accent_color;
+    font-weight: 700;
+}
+.riff-lyrics-source {
+    font-size: 0.85em;
+    opacity: 0.65;
+}
+.riff-full-player-art {
+    border-radius: 12px;
+    box-shadow: 0 18px 48px alpha(#000000, 0.55);
+}
+.riff-full-player-brand {
+    letter-spacing: -0.03em;
+    font-weight: 800;
+}
+.riff-full-lyrics {
+    min-height: 220px;
+}
+.riff-full-lyrics-line {
+    font-size: 1.15em;
+    opacity: 0.45;
+    margin: 4px 0;
+}
+.riff-full-lyrics-line-active {
+    opacity: 1.0;
+    color: @accent_color;
+    font-weight: 700;
+}
+button.riff-full-play {
+    min-width: 64px;
+    min-height: 64px;
+}
+.riff-mini-strip {
+    background-color: alpha(#16181c, 0.96);
+    border-top: 1px solid alpha(#ffffff, 0.08);
+}
+.riff-mini-progress {
+    min-height: 2px;
+    padding: 0;
+    margin: 0;
+    opacity: 0.9;
+}
+.riff-mini-progress trough,
+.riff-mini-progress slider {
+    min-height: 2px;
+    border-radius: 0;
+}
+.riff-mini-progress slider {
+    min-width: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+.riff-search-fab {
+    min-width: 52px;
+    min-height: 52px;
+    border-radius: 16px;
+    box-shadow: 0 8px 24px alpha(#000000, 0.45);
+}
+.riff-mobile-rail {
+    background-color: #000000;
+}
+.riff-mobile-rail row {
+    border-radius: 0;
+    padding: 6px 0;
+    min-height: 64px;
+}
+.riff-mobile-rail row:selected,
+.riff-mobile-rail row:selected:hover {
+    background-color: transparent;
+    box-shadow: inset 3px 0 0 @accent_bg_color;
+}
+.riff-mobile-rail row:selected .riff-rail-glyph {
+    background-color: alpha(@accent_bg_color, 0.28);
+    border-radius: 12px;
+    padding: 6px;
+}
+.riff-rail-label {
+    font-size: 0.62em;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.riff-brand-hero {
+    font-size: 2.1em;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+.riff-zone-label {
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    opacity: 0.55;
+    margin-top: 8px;
+}
+.riff-wave-card {
+    background-color: #16181c;
+    border-radius: 16px;
+    padding: 14px;
+}
+.riff-wave-play {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 9999px;
+}
+.riff-discover-list {
+    background: transparent;
+}
+.riff-discover-list row {
+    border-radius: 10px;
+    margin: 1px 0;
+}
+.riff-discover-list row:hover {
+    background-color: alpha(#ffffff, 0.06);
+}
 .riff-cover {
     border-radius: 8px;
     background-color: alpha(currentColor, 0.08);
@@ -113,21 +257,49 @@ button.riff-cover-link {
     font-size: 17px;
     font-weight: 700;
 }
-/* Spotify-style Home shortcut tiles (greeting grid). */
+/* Home shortcut tiles - elevated chips, green signature (not purple). */
 button.riff-shortcut {
-    background-color: alpha(currentColor, 0.07);
-    border-radius: 8px;
+    background-color: alpha(#ffffff, 0.06);
+    border-radius: 12px;
     padding: 0;
     min-height: 56px;
+    transition: background-color 120ms ease;
 }
 button.riff-shortcut:hover {
-    background-color: alpha(currentColor, 0.15);
+    background-color: alpha(#ffffff, 0.12);
 }
 .riff-liked-tile {
-    background: linear-gradient(135deg, #4526c8, #9a6aff);
-    border-radius: 8px;
+    background: linear-gradient(135deg, #0a7a3a, #1db954);
+    border-radius: 10px;
     color: #ffffff;
     font-size: 20px;
+    font-weight: 700;
+}
+.riff-tile-recent {
+    background: linear-gradient(135deg, #1f6feb, #58a6ff);
+}
+.riff-tile-fresh {
+    background: linear-gradient(135deg, #0d9488, #2dd4bf);
+}
+.riff-tile-rediscover {
+    background: linear-gradient(135deg, #b45309, #f59e0b);
+}
+.riff-tile-radar {
+    background: linear-gradient(135deg, #be123c, #fb7185);
+}
+.riff-tile-downloads {
+    background: linear-gradient(135deg, #334155, #64748b);
+}
+.riff-greeting {
+    opacity: 0.62;
+    font-weight: 500;
+}
+button.riff-wave-mood {
+    background-color: alpha(#ffffff, 0.06);
+}
+button.riff-wave-mood:checked {
+    background-color: @accent_bg_color;
+    color: @accent_fg_color;
 }
 /* Spotify-style hover play button on cards. */
 button.riff-card-play {
@@ -153,12 +325,32 @@ SIDEBAR_ITEMS = [
     ("explore", "Explore", "web-browser-symbolic"),
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
+    ("podcasts", "Podcasts", "emblem-music-symbolic"),
+    ("audiobooks", "Audiobooks", "media-optical-symbolic"),
+    ("cloud", "Cloud", "network-server-symbolic"),
+    ("soulsync", "SoulSync", "folder-download-symbolic"),
+    ("torrents", "Torrents", "folder-download-symbolic"),
+    ("seeker", "Seeker", "network-server-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
     ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("local", "Local Files", "folder-music-symbolic"),
     ("downloads", "Downloads", "folder-download-symbolic"),
     ("dislikes", "Disliked", "action-unavailable-symbolic"),
+]
+
+# Riff Mobile primary rail (Search is a FAB; More holds History/Local/…).
+# Matches mobile side_nav: Home · Songs · Podcasts · Audiobooks · …
+# (Playlists/Albums/Artists stay reachable; Settings via app menu).
+MOBILE_SIDEBAR_ITEMS = [
+    ("home", "Home", "user-home-symbolic"),
+    ("favorites", "Songs", "emblem-favorite-symbolic"),
+    ("podcasts", "Podcasts", "emblem-music-symbolic"),
+    ("audiobooks", "Audiobooks", "media-optical-symbolic"),
+    ("playlists", "Playlists", "view-list-symbolic"),
+    ("albums", "Albums", "media-optical-symbolic"),
+    ("artists", "Artists", "avatar-default-symbolic"),
+    ("library", "More", "open-menu-symbolic"),
 ]
 
 
@@ -178,6 +370,10 @@ class MainWindow(Adw.ApplicationWindow):
         # Required when using Adw.Breakpoint (HIG: no implicit min size).
         self.set_size_request(360, 400)
         self._load_css()
+        self._mobile_shell = (
+            str(config.settings.get("shell_layout", "mobile")) == "mobile")
+        self._nav_items = (
+            MOBILE_SIDEBAR_ITEMS if self._mobile_shell else SIDEBAR_ITEMS)
 
         # pages -----------------------------------------------------------
         self.pages = {
@@ -191,9 +387,20 @@ class MainWindow(Adw.ApplicationWindow):
             "local": LocalFilesPage(self),
             "downloads": LibraryPage(self, "downloads"),
             "dislikes": LibraryPage(self, "dislikes"),
+            "library": LibraryHub(self),
+            "albums": AlbumsPage(self),
+            "artists": ArtistsPage(self),
+            "podcasts": PodcastsPage(self),
+            "audiobooks": AudiobooksPage(self),
+            "cloud": CloudPage(self),
+            "soulsync": SoulSyncPage(self),
+            "torrents": TorrentsPage(self),
+            "seeker": SeekerPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
+        self.stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self.stack.set_transition_duration(140)
         for name, page in self.pages.items():
             self.stack.add_named(page, name)
 
@@ -265,29 +472,59 @@ class MainWindow(Adw.ApplicationWindow):
 
         self.sidebar_list = Gtk.ListBox()
         self.sidebar_list.add_css_class("navigation-sidebar")
+        if self._mobile_shell:
+            self.sidebar_list.add_css_class("riff-mobile-rail")
         self.sidebar_list.connect("row-activated", self._on_sidebar)
         self._nav_rows = []
-        for name, label, icon in SIDEBAR_ITEMS:
+        for name, label, icon in self._nav_items:
             row = Gtk.ListBoxRow()
             row.item_name = name
-            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
-            box.set_margin_top(8)
-            box.set_margin_bottom(8)
-            box.set_margin_start(8)
-            # Bundled SVGs — system themes leave some of these blank/invisible.
-            box.append(iconutil.image(icon))
-            text = Gtk.Label(label=label)
-            box.append(text)
+            if self._mobile_shell:
+                box = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=4)
+                box.set_margin_top(10)
+                box.set_margin_bottom(10)
+                box.set_halign(Gtk.Align.CENTER)
+                glyph = Gtk.Box()
+                glyph.add_css_class("riff-rail-glyph")
+                glyph.set_halign(Gtk.Align.CENTER)
+                glyph.append(iconutil.image(icon, 18))
+                box.append(glyph)
+                text = Gtk.Label(label=label)
+                text.add_css_class("riff-rail-label")
+                box.append(text)
+            else:
+                box = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                box.set_margin_top(8)
+                box.set_margin_bottom(8)
+                box.set_margin_start(8)
+                # Bundled SVGs — system themes leave some blank/invisible.
+                box.append(iconutil.image(icon))
+                text = Gtk.Label(label=label)
+                box.append(text)
             row.set_child(box)
+            row.set_tooltip_text(label)
             self._nav_rows.append((row, box, text, label))
             self.sidebar_list.append(row)
 
         sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        sidebar_box.append(header_row)
+        if self._mobile_shell:
+            sidebar_box.add_css_class("riff-mobile-rail")
+            # Brand mark at top of the rail (Riff Mobile identity).
+            brand = Gtk.Label(label="Riff")
+            brand.add_css_class("heading")
+            brand.set_margin_top(14)
+            brand.set_margin_bottom(8)
+            brand.set_halign(Gtk.Align.CENTER)
+            sidebar_box.append(brand)
+        else:
+            sidebar_box.append(header_row)
         sidebar_box.append(self.sidebar_list)
 
         # playlists section ---------------------------------------------------
-        sidebar_box.append(Gtk.Separator(margin_top=10, margin_bottom=4))
+        self._pl_separator = Gtk.Separator(margin_top=10, margin_bottom=4)
+        sidebar_box.append(self._pl_separator)
         # Spotify-style create menu: new playlist or folder
         self._new_pl = Gtk.MenuButton()
         self._new_pl_label = Gtk.Label(label="＋  New")
@@ -311,6 +548,13 @@ class MainWindow(Adw.ApplicationWindow):
         self.playlist_list.set_selection_mode(Gtk.SelectionMode.NONE)
         self.playlist_list.connect("row-activated", self._on_sidebar_playlist)
         sidebar_box.append(self.playlist_list)
+        if self._mobile_shell:
+            # Playlists live on their own tab (Riff Mobile); keep rail clean.
+            self._pl_separator.set_visible(False)
+            self._new_pl.set_visible(False)
+            self.playlist_list.set_visible(False)
+            self._collapse_btn.set_visible(False)
+            self._app_title.set_visible(False)
 
         sidebar_scroll = Gtk.ScrolledWindow()
         sidebar_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -343,16 +587,73 @@ class MainWindow(Adw.ApplicationWindow):
         self._right_sync = False
         self.player_bar.queue_btn.connect("toggled", self._on_queue_toggle)
         self.player_bar.now_btn.connect("toggled", self._on_now_toggle)
+        if self._mobile_shell:
+            self.player_bar.set_mobile_compact(True)
+
+        # Content area — mobile adds a Search FAB over the split view.
+        content = self.queue_split
+        if self._mobile_shell:
+            overlay = Gtk.Overlay()
+            overlay.set_child(self.queue_split)
+            fab = Gtk.Button()
+            fab.add_css_class("suggested-action")
+            fab.add_css_class("riff-search-fab")
+            fab.set_child(iconutil.image("system-search-symbolic", 20))
+            fab.set_tooltip_text("Search")
+            fab.set_halign(Gtk.Align.END)
+            fab.set_valign(Gtk.Align.END)
+            fab.set_margin_end(18)
+            # Clear the mini-player strip so Search isn't buried under chrome.
+            fab.set_margin_bottom(86)
+            fab.connect("clicked", lambda *_: self.goto("search"))
+            overlay.add_overlay(fab)
+            content = overlay
 
         # Adw.ToolbarView: header top, player bottom — proper chrome/backdrop.
         self.toolbar = Adw.ToolbarView()
         self.toolbar.add_top_bar(header)
-        self.toolbar.set_content(self.queue_split)
+        self.toolbar.set_content(content)
         self.toolbar.add_bottom_bar(self.player_bar)
 
         self.toaster = Adw.ToastOverlay()
         self.toaster.set_child(self.toolbar)
-        self.set_content(self.toaster)
+
+        # Shell stack: main | full player | queue/lyrics sheet (mobile).
+        self.full_player = FullPlayer(self)
+        sheet = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sheet.add_css_class("riff-full-player")
+        sheet_top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        sheet_top.set_margin_top(10)
+        sheet_top.set_margin_start(12)
+        sheet_top.set_margin_end(12)
+        sheet_close = Gtk.Button(label="⌃")
+        sheet_close.add_css_class("flat")
+        sheet_close.add_css_class("riff-heart")
+        sheet_close.set_tooltip_text("Back to player")
+        sheet_close.connect("clicked", lambda *_: self.open_full_player())
+        sheet_top.append(sheet_close)
+        sheet_title = Gtk.Label(label="Up next")
+        sheet_title.add_css_class("title-3")
+        sheet_title.set_hexpand(True)
+        sheet_top.append(sheet_title)
+        to_main = Gtk.Button(label="Close")
+        to_main.add_css_class("flat")
+        to_main.connect("clicked", lambda *_: self.close_full_player())
+        sheet_top.append(to_main)
+        sheet.append(sheet_top)
+        # Reuse the existing Now Playing panel as the full-width sheet body.
+        self._sheet_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._sheet_host.set_vexpand(True)
+        sheet.append(self._sheet_host)
+
+        self._shell_stack = Gtk.Stack()
+        self._shell_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_UP)
+        self._shell_stack.set_transition_duration(220)
+        self._shell_stack.add_named(self.toaster, "main")
+        self._shell_stack.add_named(self.full_player, "player")
+        self._shell_stack.add_named(sheet, "sheet")
+        self._player_sheet = sheet
+        self.set_content(self._shell_stack)
 
         # Adaptive: below ~900sp the left nav becomes an overlay flap.
         try:
@@ -374,6 +675,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.service.video_listeners.append(self._on_video_mode)
         self.service.video_paintable_listeners.append(
             self.player_bar.set_video_paintable)
+        self.service.track_listeners.append(self._on_track_accent)
         self._install_actions()
         self.connect("close-request", self._on_close)
 
@@ -381,6 +683,21 @@ class MainWindow(Adw.ApplicationWindow):
         self.sidebar_list.select_row(self.sidebar_list.get_row_at_index(0))
         self.pages["home"].refresh()
         self.reload_sidebar_playlists()
+        if self._mobile_shell:
+            self._apply_sidebar_mode()
+            # Esc closes the full player / sheet.
+            key = Gtk.EventControllerKey()
+            key.connect("key-pressed", self._on_shell_key)
+            self.add_controller(key)
+
+    def _on_shell_key(self, _ctrl, keyval, _code, _state) -> bool:
+        from gi.repository import Gdk
+        if keyval == Gdk.KEY_Escape:
+            visible = self._shell_stack.get_visible_child_name()
+            if visible in ("player", "sheet"):
+                self.close_full_player()
+                return True
+        return False
 
     # -- css / actions --------------------------------------------------------
 
@@ -407,6 +724,28 @@ class MainWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, cb=cb: cb())
             self.add_action(action)
+        sleep = Gio.SimpleAction.new(
+            "sleep-timer", GLib.VariantType.new("s"))
+        sleep.connect("activate", self._on_sleep_timer_action)
+        self.add_action(sleep)
+
+    def _on_sleep_timer_action(self, _action, param) -> None:
+        value = param.get_string() if param is not None else "cancel"
+        timer = self.service.sleep_timer
+        if value == "cancel":
+            timer.cancel()
+            self.toast("Sleep timer cancelled")
+            return
+        if value == "eos":
+            timer.start_end_of_song()
+            self.toast("Sleep timer · end of song")
+            return
+        try:
+            mins = int(value)
+        except (TypeError, ValueError):
+            return
+        timer.start_minutes(mins)
+        self.toast(f"Sleep timer · {mins} min")
 
     # -- navigation ------------------------------------------------------------
 
@@ -491,6 +830,17 @@ class MainWindow(Adw.ApplicationWindow):
         self.reload_sidebar_playlists()
 
     def _apply_sidebar_mode(self) -> None:
+        # Riff Mobile rail is always a compact vertical strip.
+        if getattr(self, "_mobile_shell", False) and not self._narrow:
+            self._nav_split.set_min_sidebar_width(84)
+            self._nav_split.set_max_sidebar_width(84)
+            self._app_title.set_visible(False)
+            self._collapse_btn.set_visible(False)
+            for row, box, text, label in self._nav_rows:
+                text.set_visible(True)
+                box.set_halign(Gtk.Align.CENTER)
+                row.set_tooltip_text(label)
+            return
         # In narrow overlay mode always use a full-width drawer (not icon rail).
         collapsed = self._sidebar_collapsed and not self._narrow
         if collapsed:
@@ -531,21 +881,37 @@ class MainWindow(Adw.ApplicationWindow):
 
     def reload_sidebar_playlists(self) -> None:
         """Fill the sidebar with folders, local playlists, and (when signed
-        in) the account's YouTube Music playlists."""
+        in) the account's YouTube Music playlists.
 
+        Debounced — playlist edits often fire several reloads in a burst.
+        """
+        self._sidebar_reload_gen = getattr(self, "_sidebar_reload_gen", 0) + 1
+        gen = self._sidebar_reload_gen
+
+        def kick() -> bool:
+            if gen != self._sidebar_reload_gen:
+                return False
+            self._reload_sidebar_playlists_now()
+            return False
+
+        try:
+            from gi.repository import GLib
+            GLib.timeout_add(80, kick)
+        except Exception:  # noqa: BLE001
+            self._reload_sidebar_playlists_now()
+
+    def _reload_sidebar_playlists_now(self) -> None:
         def work():
             tree = self.library.playlist_tree()
             covers: dict[int, list] = {}
-            # Up to 8 thumbnails per playlist: set_urls dedupes and builds a
-            # 2x2 collage when 4 distinct covers exist (Snowify-style).
+            # Thumbnails only — avoid hydrating full Track lists for art.
             for item in tree:
                 if item["kind"] == "playlist":
-                    tracks = self.library.playlist_tracks(item["id"])
-                    covers[item["id"]] = [t.thumbnail for t in tracks[:8]]
+                    covers[item["id"]] = self.library.playlist_thumbnails(
+                        item["id"], 8)
                 else:
                     for pid, _n, _c in item["playlists"]:
-                        tracks = self.library.playlist_tracks(pid)
-                        covers[pid] = [t.thumbnail for t in tracks[:8]]
+                        covers[pid] = self.library.playlist_thumbnails(pid, 8)
             try:
                 remote = self.api.library_playlists()
             except Exception:  # noqa: BLE001 — sidebar must never fail hard
@@ -854,16 +1220,77 @@ class MainWindow(Adw.ApplicationWindow):
             self.open_playlist(row.ref)
 
     def _on_queue_toggle(self, btn) -> None:
+        if self._mobile_shell:
+            if btn.get_active():
+                self._open_full_player_tab("queue")
+            return
         if btn.get_active():
             self._open_right_panel(tab="queue")
         else:
             self._close_right_panel_if_idle()
 
     def _on_now_toggle(self, btn) -> None:
+        if self._mobile_shell:
+            if btn.get_active():
+                self.open_full_player()
+            return
         if btn.get_active():
             self._open_right_panel(tab="queue")
         else:
             self._close_right_panel_if_idle()
+
+    def open_full_player(self, tab: str | None = None) -> None:
+        """Show the Riff Mobile full-screen player."""
+        self._restore_now_panel_to_split()
+        if tab:
+            self.full_player.show_tab(tab)
+        self._shell_stack.set_visible_child_name("player")
+
+    def close_full_player(self) -> None:
+        self._restore_now_panel_to_split()
+        self._shell_stack.set_visible_child_name("main")
+        # Clear mini-bar toggles without re-opening panels.
+        self._right_sync = True
+        try:
+            self.player_bar.now_btn.set_active(False)
+            self.player_bar.queue_btn.set_active(False)
+        finally:
+            self._right_sync = False
+
+    def _open_full_player_tab(self, tab: str) -> None:
+        """Queue sheet over the full player; lyrics stay in-player."""
+        if tab == "lyrics":
+            # Mobile: lyrics swap in place on the full player stage.
+            self._restore_now_panel_to_split()
+            self._shell_stack.set_visible_child_name("player")
+            self.full_player.show_tab("lyrics")
+            return
+        self._park_now_panel_in_sheet()
+        self.now_playing_panel.show_tab("queue")
+        self.now_playing_panel.refresh()
+        self.full_player.show_tab("queue")
+        self._shell_stack.set_visible_child_name("sheet")
+
+    def _park_now_panel_in_sheet(self) -> None:
+        panel = self.now_playing_panel
+        if panel.get_parent() is self._sheet_host:
+            return
+        try:
+            panel.unparent()
+        except Exception:  # noqa: BLE001
+            pass
+        self.queue_split.set_sidebar(Gtk.Box())
+        self._sheet_host.append(panel)
+        panel.set_hexpand(True)
+        panel.set_vexpand(True)
+
+    def _restore_now_panel_to_split(self) -> None:
+        panel = self.now_playing_panel
+        if panel.get_parent() is self._sheet_host:
+            self._sheet_host.remove(panel)
+        if panel.get_parent() is None:
+            self.queue_split.set_sidebar(panel)
+        panel.set_size_request(300, -1)
 
     def _open_right_panel(self, tab: str = "queue") -> None:
         """Show the single Now Playing panel on the given tab."""
@@ -1015,6 +1442,9 @@ class MainWindow(Adw.ApplicationWindow):
         if track is None:
             self.toast("Nothing is playing")
             return
+        if self._mobile_shell:
+            self._open_full_player_tab("lyrics")
+            return
         self._right_sync = True
         try:
             self.player_bar.now_btn.set_active(True)
@@ -1025,12 +1455,22 @@ class MainWindow(Adw.ApplicationWindow):
 
     def goto(self, name: str) -> None:
         """Navigate to a main sidebar page (used by keyboard shortcuts)."""
-        for i, (item, _label, _icon) in enumerate(SIDEBAR_ITEMS):
+        self.close_full_player()
+        for i, (item, _label, _icon) in enumerate(self._nav_items):
             if item == name:
                 row = self.sidebar_list.get_row_at_index(i)
                 self.sidebar_list.select_row(row)
                 self._on_sidebar(self.sidebar_list, row)
                 return
+        # Destinations nested under Library (or Search FAB) — no rail row.
+        if name in self.pages:
+            self.nav.pop_to_tag("root")
+            self.stack.set_visible_child_name(name)
+            page = self.pages[name]
+            if name == "search":
+                page.focus()
+            elif hasattr(page, "refresh"):
+                page.refresh()
 
     def create_playlist_dialog(self) -> None:
         self.prompt_text(
@@ -1442,7 +1882,42 @@ class MainWindow(Adw.ApplicationWindow):
     def show_settings(self) -> None:
         from .settings import SettingsDialog
 
-        SettingsDialog(self).present(self)
+        # Rebuild only when closed — opening Preferences was rebuilding the
+        # entire Adw tree (including banned-song list) on every click.
+        dlg = getattr(self, "_settings_dialog", None)
+        if dlg is None:
+            dlg = SettingsDialog(self)
+            self._settings_dialog = dlg
+
+            def _clear(*_a):
+                self._settings_dialog = None
+
+            dlg.connect("closed", _clear)
+        dlg.present(self)
+
+    def _on_track_accent(self, track) -> None:
+        """Vivi-style dynamic accent from album art (optional)."""
+        from . import theme as theme_mod
+
+        if not bool(config.settings.get("match_album_art", True)):
+            theme_mod.clear_dynamic_accent()
+            return
+        if track is None or not (track.thumbnail or "").strip():
+            theme_mod.clear_dynamic_accent()
+            return
+        url = track.thumbnail
+        seq = getattr(self, "_accent_seq", 0) + 1
+        self._accent_seq = seq
+
+        def done(pair) -> None:
+            if seq != getattr(self, "_accent_seq", 0):
+                return
+            if not pair:
+                return
+            theme_mod.apply_dynamic_accent(*pair)
+
+        from . import images as images_mod
+        images_mod.load_dominant_accent(url, done)
 
     def _ai_provider_config(self, interactive: bool) -> dict | None:
         from ..core import local_ai
