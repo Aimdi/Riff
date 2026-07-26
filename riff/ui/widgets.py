@@ -187,6 +187,10 @@ def build_track_menu(window, track: Track, on_favorite=None):
            if window.library.is_disliked(track.video_id)
            else "Never Play This")
     sec2.append(dis, "trk.dislike")
+    # Meld: swap to another YouTube upload of the same song.
+    from ..core.stream import extract_youtube_video_id
+    if extract_youtube_video_id(track.video_id or ""):
+        sec2.append("Change YouTube version…", "trk.change-yt")
     menu.append_section(None, sec2)
 
     sec3 = Gio.Menu()
@@ -231,6 +235,32 @@ def build_track_menu(window, track: Track, on_favorite=None):
                 window.open_artist(aid)
                 return
 
+    def change_youtube_version():
+        def accept(text: str) -> None:
+            from ..core.stream import extract_youtube_video_id
+            vid = extract_youtube_video_id(text)
+            if not vid:
+                window.toast("Couldn't parse a YouTube video id")
+                return
+            # Prefer swapping the live queue entry when this is current.
+            cur = window.service.current_track
+            if cur is not None and cur.video_id == track.video_id:
+                if window.service.replace_current_video_id(vid):
+                    window.toast("Switched YouTube version")
+                else:
+                    window.toast("Couldn't switch YouTube version")
+                return
+            track.video_id = vid
+            window.service.play_tracks([track])
+            window.toast("Switched YouTube version")
+
+        window.prompt_text(
+            "Change YouTube version",
+            "Paste a YouTube / YouTube Music URL or video id",
+            accept,
+            accept_label="Switch",
+        )
+
     actions = {
         "play-next": lambda: (window.service.add_next([track]),
                               window.toast("Playing next")),
@@ -245,6 +275,7 @@ def build_track_menu(window, track: Track, on_favorite=None):
         "download": lambda: window.download_track(track),
         "go-album": lambda: window.open_album(track.album_id),
         "go-artist": go_artist,
+        "change-yt": change_youtube_version,
     }
     group = Gio.SimpleActionGroup()
     for name, cb in actions.items():

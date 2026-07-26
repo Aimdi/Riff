@@ -29,8 +29,21 @@ EQ_LABELS = {
 }
 
 
-def build_af(*, eq_preset: str = "flat", normalize: bool = False) -> str:
-    """Compose an mpv af graph from EQ + optional loudness normalize."""
+# Meld-style skip silence — gentle thresholds so music isn't chewed up.
+_SKIP_SILENCE = (
+    "lavfi=[silenceremove=start_periods=1:start_silence=0.3:"
+    "start_threshold=-50dB:detection=peak:stop_periods=-1:"
+    "stop_duration=0.35:stop_threshold=-50dB]"
+)
+
+
+def build_af(
+    *,
+    eq_preset: str = "flat",
+    normalize: bool = False,
+    skip_silence: bool = False,
+) -> str:
+    """Compose an mpv af graph from EQ / loudnorm / skip-silence."""
     parts: list[str] = []
     eq = EQ_PRESETS.get((eq_preset or "flat").strip().lower(), "")
     if eq:
@@ -38,6 +51,8 @@ def build_af(*, eq_preset: str = "flat", normalize: bool = False) -> str:
     if normalize and eq_preset != "night":
         # night already includes loudnorm.
         parts.append("lavfi=[loudnorm=I=-16:TP=-1.5:LRA=11]")
+    if skip_silence:
+        parts.append(_SKIP_SILENCE)
     if not parts:
         return ""
     if len(parts) == 1:

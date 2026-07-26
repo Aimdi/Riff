@@ -223,6 +223,91 @@ class SettingsDialog(Adw.PreferencesDialog):
                 if 0 <= row.get_selected() < len(eq_keys) else "flat"))
         playback.add(eq)
 
+        skip_sil = Adw.SwitchRow()
+        skip_sil.set_title("Skip silence")
+        skip_sil.set_subtitle(
+            "Trim leading/trailing quiet gaps (mpv silenceremove)")
+        skip_sil.set_active(bool(config.settings.get("skip_silence", False)))
+        skip_sil.connect(
+            "notify::active",
+            lambda row, _p: self._on_skip_silence(bool(row.get_active())))
+        playback.add(skip_sil)
+
+        speed_keys = ["0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
+        speed_labels = [f"{s}×" for s in speed_keys]
+        speed = Adw.ComboRow()
+        speed.set_title("Playback speed")
+        speed.set_subtitle("Tempo for music and podcasts (pitch kept)")
+        speed.set_model(Gtk.StringList.new(speed_labels))
+        try:
+            cur_spd = float(config.settings.get("playback_speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            cur_spd = 1.0
+        cur_key = min(speed_keys, key=lambda s: abs(float(s) - cur_spd))
+        speed.set_selected(speed_keys.index(cur_key))
+        speed.connect(
+            "notify::selected",
+            lambda row, _p: self._on_speed(
+                float(speed_keys[row.get_selected()])
+                if 0 <= row.get_selected() < len(speed_keys) else 1.0))
+        playback.add(speed)
+
+        keep_pitch = Adw.SwitchRow()
+        keep_pitch.set_title("Keep pitch")
+        keep_pitch.set_subtitle(
+            "Correct pitch when changing playback speed")
+        keep_pitch.set_active(bool(config.settings.get("keep_pitch", True)))
+        keep_pitch.connect(
+            "notify::active",
+            lambda row, _p: self._on_keep_pitch(bool(row.get_active())))
+        playback.add(keep_pitch)
+
+        sb = Adw.SwitchRow()
+        sb.set_title("SponsorBlock")
+        sb.set_subtitle(
+            "Skip non-music / intro / outro / sponsor segments on YouTube")
+        sb.set_active(bool(config.settings.get("sponsorblock", False)))
+        sb.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "sponsorblock", bool(row.get_active())))
+        playback.add(sb)
+
+        sb_toast = Adw.SwitchRow()
+        sb_toast.set_title("SponsorBlock toast")
+        sb_toast.set_subtitle("Show a brief notice when a segment is skipped")
+        sb_toast.set_active(
+            bool(config.settings.get("sponsorblock_toast", True)))
+        sb_toast.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "sponsorblock_toast", bool(row.get_active())))
+        playback.add(sb_toast)
+
+        auto_err = Adw.SwitchRow()
+        auto_err.set_title("Auto-skip on error")
+        auto_err.set_subtitle(
+            "Retry a failed stream once, then skip to the next track")
+        auto_err.set_active(
+            bool(config.settings.get("auto_skip_on_error", True)))
+        auto_err.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "auto_skip_on_error", bool(row.get_active())))
+        playback.add(auto_err)
+
+        no_dupes = Adw.SwitchRow()
+        no_dupes.set_title("Prevent queue duplicates")
+        no_dupes.set_subtitle(
+            "Ignore Add Next / Add to Queue when the song is already queued")
+        no_dupes.set_active(
+            bool(config.settings.get("prevent_queue_duplicates", True)))
+        no_dupes.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "prevent_queue_duplicates", bool(row.get_active())))
+        playback.add(no_dupes)
+
         folder = Adw.EntryRow()
         folder.set_title("Local music folder")
         folder.set_text(str(config.settings.get("local_music_dir", "~/Music")))
@@ -922,6 +1007,17 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _on_eq(self, preset: str) -> None:
         config.settings.set("eq_preset", preset)
         self.window.service.apply_audio_fx()
+
+    def _on_skip_silence(self, enabled: bool) -> None:
+        config.settings.set("skip_silence", enabled)
+        self.window.service.apply_audio_fx()
+
+    def _on_speed(self, speed: float) -> None:
+        self.window.service.set_playback_speed(speed)
+
+    def _on_keep_pitch(self, enabled: bool) -> None:
+        config.settings.set("keep_pitch", enabled)
+        self.window.service.apply_playback_speed()
 
     def _on_radio(self, row: Adw.SwitchRow, _pspec) -> None:
         config.settings.set("autoplay_radio", bool(row.get_active()))

@@ -19,6 +19,8 @@ def test_audio_fx_compose():
     # Night embeds loudnorm — don't double it.
     night = audio_fx.build_af(eq_preset="night", normalize=True)
     assert night.count("loudnorm") == 1
+    assert "silenceremove" in audio_fx.build_af(
+        eq_preset="flat", skip_silence=True)
 
 
 def test_lyrics_result_keeps_ttml(monkeypatch):

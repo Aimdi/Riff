@@ -263,6 +263,16 @@ class PlayerEngine:
         except Exception:  # noqa: BLE001
             pass
 
+    def set_speed(self, speed: float, *, keep_pitch: bool = True) -> None:
+        """Playback rate (Meld tempo). ``keep_pitch`` uses mpv pitch correction."""
+        speed = max(0.5, min(2.5, float(speed)))
+        try:
+            self._mpv.set_property(
+                "audio-pitch-correction", "yes" if keep_pitch else "no")
+            self._mpv.set_property("speed", speed)
+        except Exception:  # noqa: BLE001
+            pass
+
     def shutdown(self) -> None:
         self._shutdown.set()
         self._mpv.wakeup()

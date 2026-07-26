@@ -180,15 +180,22 @@ class FullPlayer(Gtk.Overlay):
         self._sleep_btn.add_css_class("pill")
         self._sleep_btn.set_menu_model(self._build_sleep_menu())
         switch.append(self._sleep_btn)
+        self._speed_btn = Gtk.MenuButton(label="1×")
+        self._speed_btn.add_css_class("pill")
+        self._speed_btn.set_tooltip_text("Playback speed")
+        self._speed_btn.set_menu_model(self._build_speed_menu())
+        self._install_speed_actions()
+        switch.append(self._speed_btn)
         body.append(switch)
         self._sleep_tick_id = None
+        self._refresh_speed_label()
 
         self._similar_host = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=6)
         self._similar_host.set_margin_top(8)
         body.append(self._similar_host)
 
-        hint = Gtk.Label(label="Queue · lyrics · sleep · Esc closes")
+        hint = Gtk.Label(label="Queue · lyrics · sleep · speed · Esc closes")
         hint.add_css_class("caption")
         hint.add_css_class("dim-label")
         body.append(hint)
@@ -323,6 +330,46 @@ class FullPlayer(Gtk.Overlay):
         menu.append("End of song", "win.sleep-timer::eos")
         menu.append("Cancel", "win.sleep-timer::cancel")
         return menu
+
+    _SPEEDS = (0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
+
+    def _build_speed_menu(self):
+        from gi.repository import Gio
+
+        menu = Gio.Menu()
+        for rate in self._SPEEDS:
+            label = "1×" if rate == 1.0 else f"{rate:g}×"
+            menu.append(label, f"fp.speed::{rate:g}")
+        return menu
+
+    def _install_speed_actions(self) -> None:
+        from gi.repository import Gio, GLib
+
+        group = Gio.SimpleActionGroup()
+        action = Gio.SimpleAction.new("speed", GLib.VariantType.new("s"))
+        action.connect("activate", self._on_speed_action)
+        group.add_action(action)
+        self.insert_action_group("fp", group)
+
+    def _on_speed_action(self, _action, param) -> None:
+        try:
+            rate = float(param.get_string())
+        except (TypeError, ValueError, AttributeError):
+            return
+        self.service.set_playback_speed(rate)
+        self._refresh_speed_label()
+
+    def _refresh_speed_label(self) -> None:
+        from .. import config
+
+        try:
+            rate = float(config.settings.get("playback_speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            rate = 1.0
+        if abs(rate - 1.0) < 0.01:
+            self._speed_btn.set_label("1×")
+        else:
+            self._speed_btn.set_label(f"{rate:g}×")
 
     def _load_similar(self, track: Track) -> None:
         while child := self._similar_host.get_first_child():

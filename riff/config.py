@@ -42,6 +42,14 @@ DEFAULTS = {
     "match_album_art": True,  # dynamic accent from cover (Pitch Black stays black)
     "normalize_volume": False,  # mpv loudnorm-ish leveling across tracks
     "eq_preset": "flat",  # flat | bass | vocal | night
+    # Meld-inspired playback.
+    "skip_silence": False,
+    "playback_speed": 1.0,
+    "keep_pitch": True,
+    "sponsorblock": False,  # opt-in; music_offtopic/intro/outro/sponsor
+    "sponsorblock_toast": True,
+    "auto_skip_on_error": True,
+    "prevent_queue_duplicates": True,
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",
