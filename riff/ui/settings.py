@@ -131,33 +131,52 @@ class SettingsDialog(Adw.PreferencesDialog):
         playback.add(folder)
         page.add(playback)
 
-        # -- Audiobookshelf (stub; LibriVox plays without a server) ------------
+        # -- Audiobookshelf (Lissen-compatible) --------------------------------
         abs_group = Adw.PreferencesGroup()
         abs_group.set_title("Audiobookshelf")
         abs_group.set_description(
-            "Optional self-hosted library (Navidrome-style for books). "
-            "LibriVox discover & play works without this. Full sync is next.")
-        abs_host = Adw.EntryRow()
-        abs_host.set_title("Server URL")
-        abs_host.set_text(str(config.settings.get("abs_host", "") or ""))
-        abs_host.set_show_apply_button(True)
-        abs_host.connect("apply", lambda row: self._save(
+            "Stream your self-hosted library (same API as Riff Mobile / "
+            "Lissen). LibriVox discover still works without a server.")
+        self._abs_host = Adw.EntryRow()
+        self._abs_host.set_title("Server URL")
+        self._abs_host.set_text(
+            str(config.settings.get("abs_host", "") or ""))
+        self._abs_host.set_show_apply_button(True)
+        self._abs_host.connect("apply", lambda row: self._save(
             "abs_host", row.get_text().strip()))
-        abs_group.add(abs_host)
-        abs_user = Adw.EntryRow()
-        abs_user.set_title("Username")
-        abs_user.set_text(str(config.settings.get("abs_username", "") or ""))
-        abs_user.set_show_apply_button(True)
-        abs_user.connect("apply", lambda row: self._save(
+        abs_group.add(self._abs_host)
+        self._abs_user = Adw.EntryRow()
+        self._abs_user.set_title("Username")
+        self._abs_user.set_text(
+            str(config.settings.get("abs_username", "") or ""))
+        self._abs_user.set_show_apply_button(True)
+        self._abs_user.connect("apply", lambda row: self._save(
             "abs_username", row.get_text().strip()))
-        abs_group.add(abs_user)
-        abs_pass = Adw.PasswordEntryRow()
-        abs_pass.set_title("Password")
-        abs_pass.set_text(str(config.settings.get("abs_password", "") or ""))
-        abs_pass.set_show_apply_button(True)
-        abs_pass.connect("apply", lambda row: self._save(
+        abs_group.add(self._abs_user)
+        self._abs_pass = Adw.PasswordEntryRow()
+        self._abs_pass.set_title("Password")
+        self._abs_pass.set_text(
+            str(config.settings.get("abs_password", "") or ""))
+        self._abs_pass.set_show_apply_button(True)
+        self._abs_pass.connect("apply", lambda row: self._save(
             "abs_password", row.get_text()))
-        abs_group.add(abs_pass)
+        abs_group.add(self._abs_pass)
+        connected = bool(config.settings.get("abs_token", ""))
+        self._abs_status = Adw.ActionRow()
+        self._abs_status.set_title(
+            "Connected" if connected else "Not connected")
+        self._abs_status.set_subtitle(
+            str(config.settings.get("abs_host", "") or "")
+            if connected else "Save credentials, then Connect")
+        connect_btn = Gtk.Button(
+            label="Disconnect" if connected else "Connect")
+        connect_btn.set_valign(Gtk.Align.CENTER)
+        if not connected:
+            connect_btn.add_css_class("suggested-action")
+        connect_btn.connect("clicked", self._on_abs_toggle)
+        self._abs_status.add_suffix(connect_btn)
+        self._abs_connect_btn = connect_btn
+        abs_group.add(self._abs_status)
         page.add(abs_group)
 
         # -- scrobbling ---------------------------------------------------------
@@ -439,6 +458,57 @@ class SettingsDialog(Adw.PreferencesDialog):
     def _save(self, key: str, value: str) -> None:
         config.settings.set(key, value.strip())
         self.window.toast("Saved")
+
+    def _on_abs_toggle(self, _btn) -> None:
+        if config.settings.get("abs_token", ""):
+            for key in ("abs_token", "abs_user_id", "abs_library_id"):
+                config.settings.set(key, "")
+            self._abs_status.set_title("Not connected")
+            self._abs_status.set_subtitle("Save credentials, then Connect")
+            self._abs_connect_btn.set_label("Connect")
+            self._abs_connect_btn.add_css_class("suggested-action")
+            self.window.toast("Audiobookshelf disconnected")
+            return
+
+        from ..core import audiobookshelf as abs_mod
+
+        host = self._abs_host.get_text().strip()
+        user = self._abs_user.get_text().strip()
+        password = self._abs_pass.get_text()
+        config.settings.set("abs_host", host)
+        config.settings.set("abs_username", user)
+        config.settings.set("abs_password", password)
+        self._abs_status.set_subtitle("Connecting…")
+        self._abs_connect_btn.set_sensitive(False)
+
+        def work():
+            session = abs_mod.login(host, user, password)
+            libs = abs_mod.fetch_libraries(session)
+            lib = abs_mod.prefer_book_library(libs)
+            if lib:
+                session.library_id = lib.id
+            return session
+
+        def done(session) -> None:
+            config.settings.set("abs_host", session.host)
+            config.settings.set("abs_username", session.username)
+            config.settings.set("abs_token", session.token)
+            config.settings.set("abs_user_id", session.user_id)
+            config.settings.set("abs_library_id", session.library_id)
+            self._abs_status.set_title("Connected")
+            self._abs_status.set_subtitle(session.host)
+            self._abs_connect_btn.set_label("Disconnect")
+            self._abs_connect_btn.set_sensitive(True)
+            self._abs_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("Audiobookshelf connected")
+
+        def fail(exc: Exception) -> None:
+            self._abs_status.set_title("Not connected")
+            self._abs_status.set_subtitle(str(exc))
+            self._abs_connect_btn.set_sensitive(True)
+            self.window.toast(f"Audiobookshelf: {exc}")
+
+        run_async(work, done, fail, name="riff-abs-login")
 
     def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
         key = self._theme_keys[row.get_selected()]

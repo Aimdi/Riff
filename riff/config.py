@@ -45,10 +45,13 @@ DEFAULTS = {
     "discord_rpc_enabled": False,
     "discord_client_id": "",  # Discord developer application id
     "local_music_dir": "~/Music",
-    # Audiobookshelf (self-hosted) — credentials stored for a future client.
+    # Audiobookshelf (self-hosted) — Lissen-compatible login + stream.
     "abs_host": "",
     "abs_username": "",
     "abs_password": "",
+    "abs_token": "",
+    "abs_user_id": "",
+    "abs_library_id": "",
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
     # "mobile" = Riff Mobile shell (rail + mini player + full player);

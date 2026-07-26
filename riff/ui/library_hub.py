@@ -13,7 +13,8 @@ from .widgets import CardGrid, scroll_wrap, status_page
 _MORE_DESTINATIONS = (
     ("podcasts", "Podcasts", "Apple directory + RSS — play episodes in Riff",
      "emblem-music-symbolic"),
-    ("audiobooks", "Audiobooks", "LibriVox free books — chapters play in Riff",
+    ("audiobooks", "Audiobooks",
+     "LibriVox + Audiobookshelf — chapters play in Riff",
      "media-optical-symbolic"),
     ("explore", "Explore & Discover", "Charts, moods, and personal picks",
      "web-browser-symbolic"),
