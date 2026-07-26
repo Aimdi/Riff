@@ -195,6 +195,7 @@ class HomePage(ContentPage):
             wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             wrap.set_margin_bottom(2)
             brand = Gtk.Label(label="Riff")
+            brand.add_css_class("title-1")
             brand.add_css_class("riff-brand-hero")
             brand.set_xalign(0.0)
             wrap.append(brand)
