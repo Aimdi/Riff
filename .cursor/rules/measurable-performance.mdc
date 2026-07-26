@@ -1,0 +1,12 @@
+---
+description: Performance changes require a defined metric and before/after evidence
+alwaysApply: true
+---
+
+# Measurable performance
+
+- Any change justified as faster, smoother, or lighter must name **one primary metric**, a **method**, and **baseline → target → result**.
+- Reject vibes-only claims (“feels snappier”) unless paired with a metric or explicitly scoped as perceptual UX (skeleton/optimistic UI) under Experience.
+- Prefer skills `measure-startup` and `measure-playback-gap` when relevant.
+- Desktop aliases: TTFB → API/stream/window timing; bundle size → package/import cost; ANR → UI freeze from main-thread I/O.
+- Verifier must be able to reproduce the measurement from the PR description.

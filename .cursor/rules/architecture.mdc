@@ -1,0 +1,12 @@
+---
+description: Riff core/UI boundary and threading rules
+alwaysApply: true
+---
+
+# Riff architecture
+
+- `riff/core/` must not import `gi` (secrets may lazy-import optionally).
+- Network, disk, and yt-dlp work belong on worker threads. Touch GTK only via `GLib.idle_add` or `riff.util.run_async`.
+- Never pass untrusted strings to a shell.
+- Secrets go through `riff.core.secrets`, not `settings.json`.
+- Prefer extending existing modules under `riff/core/` and `riff/ui/` over new parallel layers.
