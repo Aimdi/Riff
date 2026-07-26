@@ -15,6 +15,13 @@ from . import theme
 _QUALITIES = ["high", "medium", "low"]
 _QUALITY_LABELS = ["High (best available)", "Medium (~160 kbps)", "Low (~96 kbps)"]
 
+_LYRICS_SOURCES = ["auto", "better", "lrclib"]
+_LYRICS_LABELS = [
+    "Auto (LRCLIB → Better → KuGou)",
+    "Better Lyrics first",
+    "LRCLIB first",
+]
+
 # Provider combo indices — keep in sync with _on_provider / _provider_index.
 _PROVIDERS = ("local", "anthropic", "openai")
 _PROVIDER_LABELS = (
@@ -147,6 +154,37 @@ class SettingsDialog(Adw.PreferencesDialog):
                 "podcast_continuous", bool(row.get_active())))
         playback.add(pod_cont)
 
+        pod_ads = Adw.SwitchRow()
+        pod_ads.set_title("Skip podcast ads")
+        pod_ads.set_subtitle(
+            "Automatically skip sponsor/ad chapters when Podcasting 2.0 "
+            "markers are present")
+        pod_ads.set_active(
+            bool(config.settings.get("podcast_auto_skip_ads", True)))
+        pod_ads.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "podcast_auto_skip_ads", bool(row.get_active())))
+        playback.add(pod_ads)
+
+        lyrics = Adw.ComboRow()
+        lyrics.set_title("Lyrics source")
+        lyrics.set_subtitle(
+            "Preferred synced-lyrics provider (KuGou is always a fallback)")
+        lyrics.set_model(Gtk.StringList.new(_LYRICS_LABELS))
+        cur_lyrics = str(config.settings.get("lyrics_source", "auto") or "auto")
+        lyrics.set_selected(
+            _LYRICS_SOURCES.index(cur_lyrics)
+            if cur_lyrics in _LYRICS_SOURCES else 0)
+        lyrics.connect(
+            "notify::selected",
+            lambda row, _p: config.settings.set(
+                "lyrics_source",
+                _LYRICS_SOURCES[row.get_selected()]
+                if 0 <= row.get_selected() < len(_LYRICS_SOURCES)
+                else "auto"))
+        playback.add(lyrics)
+
         folder = Adw.EntryRow()
         folder.set_title("Local music folder")
         folder.set_text(str(config.settings.get("local_music_dir", "~/Music")))
@@ -155,6 +193,37 @@ class SettingsDialog(Adw.PreferencesDialog):
             "local_music_dir", row.get_text()))
         playback.add(folder)
         page.add(playback)
+
+        # -- Never play / banned ----------------------------------------------
+        banned = Adw.PreferencesGroup()
+        banned.set_title("Never play")
+        banned.set_description(
+            "Tracks you've marked “never play this” are excluded from "
+            "radio and discovery.")
+        dislikes = self.window.library.dislikes()
+        if not dislikes:
+            empty = Adw.ActionRow()
+            empty.set_title("No banned songs")
+            empty.set_subtitle("Long-press a track in the player to ban it")
+            banned.add(empty)
+        else:
+            for track in dislikes[:40]:
+                row = Adw.ActionRow()
+                row.set_title(track.title or track.video_id)
+                row.set_subtitle(track.artist or "")
+                rm = Gtk.Button(label="Remove")
+                rm.add_css_class("flat")
+                rm.set_valign(Gtk.Align.CENTER)
+
+                def _unban(_b, vid=track.video_id, r=row) -> None:
+                    self.window.library.remove_dislike(vid)
+                    banned.remove(r)
+                    self.window.toast("Removed from never-play list")
+
+                rm.connect("clicked", _unban)
+                row.add_suffix(rm)
+                banned.add(row)
+        page.add(banned)
 
         # -- Audiobookshelf (Lissen-compatible) --------------------------------
         abs_group = Adw.PreferencesGroup()

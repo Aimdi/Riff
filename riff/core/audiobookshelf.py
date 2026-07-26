@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import logging
+import mimetypes
+import uuid
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -21,10 +23,17 @@ _UA = "Riff/1.0 (Audiobookshelf; Lissen-compatible; +https://github.com/Aimdi/Ri
 
 
 @dataclass
+class AbsFolder:
+    id: str
+    full_path: str = ""
+
+
+@dataclass
 class AbsLibrary:
     id: str
     name: str
     media_type: str = "book"
+    folders: list[AbsFolder] = field(default_factory=list)
 
 
 @dataclass
@@ -170,6 +179,20 @@ def login(host: str, username: str, password: str) -> AbsSession:
     )
 
 
+def _parse_folders(raw_folders) -> list[AbsFolder]:
+    out: list[AbsFolder] = []
+    if not isinstance(raw_folders, list):
+        return out
+    for f in raw_folders:
+        if not isinstance(f, dict) or not f.get("id"):
+            continue
+        out.append(AbsFolder(
+            id=str(f["id"]),
+            full_path=str(f.get("fullPath") or f.get("name") or ""),
+        ))
+    return out
+
+
 def fetch_libraries(session: AbsSession) -> list[AbsLibrary]:
     data = _http_json(
         "GET", f"{session.host}/api/libraries", token=session.token)
@@ -183,8 +206,79 @@ def fetch_libraries(session: AbsSession) -> list[AbsLibrary]:
                 id=str(raw["id"]),
                 name=str(raw.get("name") or "Library"),
                 media_type=str(raw.get("mediaType") or "book"),
+                folders=_parse_folders(raw.get("folders")),
             ))
     return out
+
+
+def upload_book(
+    session: AbsSession,
+    *,
+    library_id: str,
+    folder_id: str,
+    title: str,
+    files: list[tuple[str, bytes]],
+    author: str = "",
+    series: str = "",
+    timeout: float = 1800,
+) -> None:
+    """Multipart ``POST /api/upload`` (mobile Audiobookshelf parity).
+
+    ``files`` is a list of ``(filename, bytes)``. Keys are ``0``, ``1``, …
+    as ABS expects.
+    """
+    if not library_id or not folder_id:
+        raise ValueError("library and folder are required")
+    if not files:
+        raise ValueError("No files to upload")
+    boundary = f"----RiffBoundary{uuid.uuid4().hex}"
+    body = bytearray()
+
+    def _field(name: str, value: str) -> None:
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
+        body.extend(f"{value}\r\n".encode())
+
+    def _file(name: str, filename: str, data: bytes) -> None:
+        ctype = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        body.extend(f"--{boundary}\r\n".encode())
+        body.extend(
+            f'Content-Disposition: form-data; name="{name}"; '
+            f'filename="{filename}"\r\n'.encode())
+        body.extend(f"Content-Type: {ctype}\r\n\r\n".encode())
+        body.extend(data)
+        body.extend(b"\r\n")
+
+    _field("title", title or "Untitled")
+    _field("library", library_id)
+    _field("folder", folder_id)
+    if (author or "").strip():
+        _field("author", author.strip())
+    if (series or "").strip():
+        _field("series", series.strip())
+    for i, (filename, data) in enumerate(files):
+        _file(str(i), filename or f"track{i}.mp3", data)
+    body.extend(f"--{boundary}--\r\n".encode())
+
+    url = f"{session.host}/api/upload"
+    req = urllib.request.Request(
+        url,
+        data=bytes(body),
+        method="POST",
+        headers={
+            "User-Agent": _UA,
+            "Authorization": f"Bearer {session.token}",
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "Accept": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            resp.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:200]
+        raise RuntimeError(f"ABS upload {exc.code}: {detail or exc.reason}") from exc
 
 
 def prefer_book_library(libraries: list[AbsLibrary]) -> AbsLibrary | None:
@@ -393,6 +487,7 @@ def parse_libraries_payload(data: dict | list) -> list[AbsLibrary]:
                     id=str(raw["id"]),
                     name=str(raw.get("name") or "Library"),
                     media_type=str(raw.get("mediaType") or "book"),
+                    folders=_parse_folders(raw.get("folders")),
                 ))
     return out
 

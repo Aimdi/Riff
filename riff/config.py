@@ -33,6 +33,11 @@ DEFAULTS = {
     "crossfade": 0,  # seconds of blend between songs, 0 = off
     "exploration": 0.3,  # radio/discovery: 0 = familiar, 1 = adventurous
     "podcast_continuous": True,  # auto-advance episodes in podcast queue
+    # Skip Podcasting 2.0 sponsor/ad chapters when markers are present.
+    "podcast_auto_skip_ads": True,
+    # Lyrics provider preference (mobile LyricsSource).
+    # "auto" | "better" | "lrclib" — KuGou is always a last-resort fallback.
+    "lyrics_source": "auto",
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",

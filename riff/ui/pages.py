@@ -1625,7 +1625,15 @@ class StatsPage(ContentPage):
     def _present(self, data) -> None:
         overview, prev, top_songs, top_artists, days = data
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
-        box.append(self._range_selector())
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        top.append(self._range_selector())
+        rewind_btn = Gtk.Button(label="Riff Rewind")
+        rewind_btn.add_css_class("suggested-action")
+        rewind_btn.add_css_class("pill")
+        rewind_btn.set_valign(Gtk.Align.CENTER)
+        rewind_btn.connect("clicked", lambda *_: self._show_rewind())
+        top.append(rewind_btn)
+        box.append(top)
 
         if not overview["plays"]:
             box.append(status_page(
@@ -1776,6 +1784,79 @@ class StatsPage(ContentPage):
                 row_a.add_suffix(bar)
                 lb.append(row_a)
             box.append(lb)
+
+        self.show_widget(scroll_wrap(_padded(box)))
+
+    def _show_rewind(self) -> None:
+        from ..core import rewind as rewind_mod
+
+        data = rewind_mod.build_rewind(self.window.library)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        back = Gtk.Button(label="← Stats")
+        back.add_css_class("flat")
+        back.set_halign(Gtk.Align.START)
+        back.connect("clicked", lambda *_: self.refresh())
+        box.append(back)
+
+        title = Gtk.Label(label="Riff Rewind")
+        title.add_css_class("title-1")
+        title.set_xalign(0.0)
+        box.append(title)
+        sub = Gtk.Label(
+            label="Your listening story from local history — "
+                  "no account, no server.")
+        sub.add_css_class("dim-label")
+        sub.set_wrap(True)
+        sub.set_xalign(0.0)
+        box.append(sub)
+
+        if not data.get("enough"):
+            box.append(status_page(
+                "riff-stats-symbolic", "Not enough plays yet",
+                "Keep listening — Rewind unlocks after a handful of plays."))
+            self.show_widget(scroll_wrap(_padded(box)))
+            return
+
+        level = Gtk.Label(label=str(data["level"]))
+        level.add_css_class("title-1")
+        level.set_xalign(0.0)
+        box.append(level)
+        level_cap = Gtk.Label(label="Listener level")
+        level_cap.add_css_class("dim-label")
+        level_cap.set_xalign(0.0)
+        box.append(level_cap)
+
+        hours = data["seconds"] / 3600
+        hours_txt = f"{hours:.0f}" if hours >= 100 else f"{hours:.1f}"
+        for value, label in (
+            (str(data["plays"]), "total plays"),
+            (hours_txt, "hours listened"),
+            (str(data["artists"]), "artists explored"),
+        ):
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            v = Gtk.Label(label=value)
+            v.add_css_class("title-1")
+            line.append(v)
+            n = Gtk.Label(label=label)
+            n.add_css_class("title-3")
+            n.set_xalign(0.0)
+            n.set_hexpand(True)
+            line.append(n)
+            box.append(line)
+
+        if data.get("top_artist"):
+            name, plays = data["top_artist"]
+            art = Gtk.Label(label=f"Top artist · {name} ({plays})")
+            art.add_css_class("heading")
+            art.set_xalign(0.0)
+            box.append(art)
+        if data.get("top_song"):
+            track, plays = data["top_song"]
+            song = Gtk.Label(
+                label=f"Top song · {track.title} ({plays})")
+            song.add_css_class("heading")
+            song.set_xalign(0.0)
+            box.append(song)
 
         self.show_widget(scroll_wrap(_padded(box)))
 

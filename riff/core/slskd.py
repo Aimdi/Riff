@@ -53,7 +53,8 @@ def normalize_host(raw: str) -> str:
 
 
 def _http_json(
-    method: str, url: str, *, api_key: str = "", body: dict | None = None,
+    method: str, url: str, *, api_key: str = "",
+    body: dict | list | None = None,
     timeout: float = 30,
 ) -> tuple[int, object]:
     data = None
@@ -151,10 +152,29 @@ def search_responses(session: SlskdSession, search_id: str) -> list[SlskdHit]:
     return out
 
 
+def enqueue_download(
+    session: SlskdSession, username: str, filename: str, size: int = 0,
+) -> None:
+    """Queue a download on the slskd server (mobile Seeker parity)."""
+    user = (username or "").strip()
+    name = (filename or "").strip()
+    if not user or not name:
+        raise ValueError("username and filename are required")
+    status, _data = _http_json(
+        "POST",
+        f"{session.host}/api/v0/transfers/downloads/"
+        f"{urllib.parse.quote(user)}",
+        api_key=session.api_key,
+        body=[{"filename": name, "size": int(size or 0)}],
+    )
+    if status in (401, 403):
+        raise RuntimeError("slskd authentication failed")
+    if status not in (200, 201):
+        raise RuntimeError(f"slskd download failed ({status})")
+
+
 def parse_responses_payload(data) -> list[SlskdHit]:
     """Test helper."""
-    session = SlskdSession(host="http://x")
-    # reuse parsing without network by calling search_responses shape:
     if not isinstance(data, list):
         return []
     out: list[SlskdHit] = []
@@ -171,5 +191,4 @@ def parse_responses_payload(data) -> list[SlskdHit]:
                 ))
         if user and files:
             out.append(SlskdHit(username=user, files=files))
-    _ = session
     return out

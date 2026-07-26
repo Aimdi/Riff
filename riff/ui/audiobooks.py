@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from gi.repository import Gtk, Pango
 
@@ -76,10 +77,20 @@ class AudiobooksPage(Gtk.Box):
 
         session = _abs_session()
         if session:
+            lib_head_row = Gtk.Box(
+                orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
             lib_head = Gtk.Label(label="Your library")
             lib_head.add_css_class("title-3")
             lib_head.set_xalign(0.0)
-            box.append(lib_head)
+            lib_head.set_hexpand(True)
+            lib_head_row.append(lib_head)
+            upload = Gtk.Button(label="Upload")
+            upload.add_css_class("suggested-action")
+            upload.add_css_class("pill")
+            upload.connect(
+                "clicked", lambda *_: self._prompt_upload(session))
+            lib_head_row.append(upload)
+            box.append(lib_head_row)
             self._abs_host = Gtk.Box(
                 orientation=Gtk.Orientation.VERTICAL, spacing=6)
             loading = Gtk.Label(label="Loading library…")
@@ -95,6 +106,22 @@ class AudiobooksPage(Gtk.Box):
             hint.set_wrap(True)
             hint.set_xalign(0.0)
             box.append(hint)
+
+        saved = self.window.library.saved_audiobooks()
+        saved_head = Gtk.Label(label="Saved")
+        saved_head.add_css_class("title-3")
+        saved_head.set_xalign(0.0)
+        saved_head.set_margin_top(4)
+        box.append(saved_head)
+        if saved:
+            for row in saved[:40]:
+                box.append(self._saved_row(row, session))
+        else:
+            empty_s = Gtk.Label(
+                label="Bookmark books with Save on a library item")
+            empty_s.add_css_class("dim-label")
+            empty_s.set_xalign(0.0)
+            box.append(empty_s)
 
         search_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         entry = Gtk.SearchEntry()
@@ -183,7 +210,144 @@ class AudiobooksPage(Gtk.Box):
         open_btn.connect(
             "clicked", lambda *_: self._open_abs_book(session, book.id))
         row.append(open_btn)
+        saved = self.window.library.is_audiobook_saved(book.id)
+        save_btn = Gtk.Button(label="Saved" if saved else "Save")
+        save_btn.add_css_class("flat")
+        save_btn.connect(
+            "clicked",
+            lambda *_: self._toggle_save_abs(session, book, save_btn))
+        row.append(save_btn)
         return row
+
+    def _toggle_save_abs(
+        self,
+        session: abs_mod.AbsSession,
+        book: abs_mod.AbsBook,
+        btn: Gtk.Button,
+    ) -> None:
+        now = self.window.library.toggle_saved_audiobook(
+            book.id,
+            book.title,
+            author=book.author or "",
+            artwork=book.cover_url(session.host, session.token),
+            source="abs",
+            payload={"id": book.id},
+        )
+        btn.set_label("Saved" if now else "Save")
+        self.window.toast(
+            "Saved" if now else "Removed from Saved")
+
+    def _saved_row(
+        self, row: dict, session: abs_mod.AbsSession | None,
+    ) -> Gtk.Widget:
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        art = CoverArt(56)
+        art.set_url(str(row.get("artwork") or ""))
+        box.append(art)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        t = Gtk.Label(label=str(row.get("title") or "Audiobook"))
+        t.add_css_class("heading")
+        t.set_xalign(0.0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        a = Gtk.Label(label=str(row.get("author") or row.get("source") or ""))
+        a.add_css_class("dim-label")
+        a.add_css_class("caption")
+        a.set_xalign(0.0)
+        text.append(t)
+        text.append(a)
+        box.append(text)
+        if session and (row.get("source") or "abs") == "abs":
+            open_btn = Gtk.Button(label="Open")
+            open_btn.add_css_class("flat")
+            open_btn.connect(
+                "clicked",
+                lambda *_: self._open_abs_book(
+                    session, str(row.get("book_id") or "")))
+            box.append(open_btn)
+        rm = Gtk.Button(label="Remove")
+        rm.add_css_class("flat")
+        rm.connect(
+            "clicked",
+            lambda *_: (
+                self.window.library.unsave_audiobook(
+                    str(row.get("book_id") or "")),
+                self.window.toast("Removed from Saved"),
+                self._show_hub()))
+        box.append(rm)
+        return box
+
+    def _prompt_upload(self, session: abs_mod.AbsSession) -> None:
+        dialog = Gtk.FileDialog()
+        dialog.set_title("Upload audiobook files")
+
+        def on_open(_d, result) -> None:
+            try:
+                files = dialog.open_multiple_finish(result)
+            except Exception:  # noqa: BLE001 — cancelled
+                return
+            if files is None:
+                return
+            paths: list[str] = []
+            n = files.get_n_items()
+            for i in range(n):
+                f = files.get_item(i)
+                try:
+                    paths.append(f.get_path())
+                except Exception:  # noqa: BLE001
+                    continue
+            paths = [p for p in paths if p]
+            if not paths:
+                return
+            self._run_upload(session, paths)
+
+        dialog.open_multiple(self.window, None, on_open)
+
+    def _run_upload(
+        self, session: abs_mod.AbsSession, paths: list[str],
+    ) -> None:
+        self.window.toast(f"Uploading {len(paths)} file(s)…")
+
+        def work():
+            libs = abs_mod.fetch_libraries(session)
+            lib = None
+            if session.library_id:
+                for candidate in libs:
+                    if candidate.id == session.library_id:
+                        lib = candidate
+                        break
+            if lib is None:
+                lib = abs_mod.prefer_book_library(libs)
+            if lib is None:
+                raise RuntimeError("No Audiobookshelf library found")
+            if not lib.folders:
+                raise RuntimeError(
+                    "This library has no upload folders configured")
+            folder_id = lib.folders[0].id
+            title = os.path.splitext(os.path.basename(paths[0]))[0]
+            files: list[tuple[str, bytes]] = []
+            for p in paths:
+                with open(p, "rb") as fh:
+                    files.append((os.path.basename(p), fh.read()))
+            abs_mod.upload_book(
+                session,
+                library_id=lib.id,
+                folder_id=folder_id,
+                title=title,
+                files=files,
+            )
+            return title
+
+        def done(title: str) -> None:
+            self.window.toast(f"Uploaded “{title}”")
+            self._show_hub()
+
+        def fail(exc: Exception) -> None:
+            self.window.toast(f"Upload failed: {exc}")
+
+        run_async(work, done, fail, name="riff-abs-upload")
 
     def _open_abs_book(
         self, session: abs_mod.AbsSession, book_id: str,

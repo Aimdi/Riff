@@ -132,19 +132,41 @@ def search_shows(term: str, *, limit: int = 40) -> list[PodcastShow]:
     return out
 
 
-def top_shows(*, limit: int = 25) -> list[PodcastShow]:
-    """US top podcasts chart (may lack feedUrl until lookup)."""
-    data = _http_json(
-        f"https://itunes.apple.com/us/rss/toppodcasts/limit={int(limit)}/json")
-    entries = ((data.get("feed") or {}).get("entry")) or []
+PODCAST_GENRES: list[tuple[str, str]] = [
+    ("1489", "News"),
+    ("1303", "Comedy"),
+    ("1488", "True Crime"),
+    ("1324", "Society & Culture"),
+    ("1321", "Business"),
+    ("1318", "Technology"),
+    ("1512", "History"),
+    ("1487", "Health & Fitness"),
+    ("1533", "Science"),
+    ("1304", "Education"),
+    ("1310", "Music"),
+    ("1545", "Sports"),
+    ("1483", "Fiction"),
+    ("1314", "Religion & Spirituality"),
+    ("1502", "Leisure"),
+    ("1309", "TV & Film"),
+    ("1301", "Arts"),
+    ("1305", "Kids & Family"),
+    ("1511", "Government"),
+]
+
+
+def _shows_from_chart_entries(entries) -> list[PodcastShow]:
     out: list[PodcastShow] = []
-    for entry in entries:
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            continue
         name = ((entry.get("im:name") or {}).get("label")) or ""
         author = ((entry.get("im:artist") or {}).get("label")) or ""
         images = entry.get("im:image") or []
         art = ""
         if images:
-            art = (images[-1].get("label") or "") if isinstance(images[-1], dict) else ""
+            art = (images[-1].get("label") or "") if isinstance(
+                images[-1], dict) else ""
         cid = ((entry.get("id") or {}).get("attributes") or {}).get("im:id") or ""
         out.append(PodcastShow(
             title=str(name),
@@ -154,6 +176,26 @@ def top_shows(*, limit: int = 25) -> list[PodcastShow]:
             collection_id=str(cid),
         ))
     return out
+
+
+def top_shows(*, limit: int = 25) -> list[PodcastShow]:
+    """US top podcasts chart (may lack feedUrl until lookup)."""
+    data = _http_json(
+        f"https://itunes.apple.com/us/rss/toppodcasts/limit={int(limit)}/json")
+    entries = ((data.get("feed") or {}).get("entry")) or []
+    return _shows_from_chart_entries(entries)
+
+
+def top_by_genre(genre_id: str, *, limit: int = 40) -> list[PodcastShow]:
+    """Top podcasts in an Apple genre (may lack feedUrl until lookup)."""
+    genre_id = (genre_id or "").strip()
+    if not genre_id:
+        return []
+    data = _http_json(
+        f"https://itunes.apple.com/us/rss/toppodcasts/"
+        f"genre={urllib.parse.quote(genre_id)}/limit={int(limit)}/json")
+    entries = ((data.get("feed") or {}).get("entry")) or []
+    return _shows_from_chart_entries(entries)
 
 
 def lookup_feed_urls(collection_ids: list[str]) -> dict[str, str]:

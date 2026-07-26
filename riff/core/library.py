@@ -134,6 +134,27 @@ CREATE TABLE IF NOT EXISTS podcast_queue (
     track_json TEXT NOT NULL,
     added_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS podcast_folders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#3b82f6',
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS podcast_folder_items (
+    folder_id INTEGER NOT NULL,
+    feed_url TEXT NOT NULL,
+    PRIMARY KEY (folder_id, feed_url),
+    FOREIGN KEY (folder_id) REFERENCES podcast_folders(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS saved_audiobooks (
+    book_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    author TEXT NOT NULL DEFAULT '',
+    artwork TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL DEFAULT 'abs',
+    payload TEXT NOT NULL DEFAULT '{}',
+    saved_at REAL NOT NULL
+);
 """
 
 
@@ -239,6 +260,31 @@ class Library:
             "track_json TEXT NOT NULL,"
             "added_at REAL NOT NULL)"
         )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS podcast_folders ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+            "name TEXT NOT NULL,"
+            "color TEXT NOT NULL DEFAULT '#3b82f6',"
+            "created_at REAL NOT NULL)"
+        )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS podcast_folder_items ("
+            "folder_id INTEGER NOT NULL,"
+            "feed_url TEXT NOT NULL,"
+            "PRIMARY KEY (folder_id, feed_url),"
+            "FOREIGN KEY (folder_id) REFERENCES podcast_folders(id) "
+            "ON DELETE CASCADE)"
+        )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS saved_audiobooks ("
+            "book_id TEXT PRIMARY KEY,"
+            "title TEXT NOT NULL,"
+            "author TEXT NOT NULL DEFAULT '',"
+            "artwork TEXT NOT NULL DEFAULT '',"
+            "source TEXT NOT NULL DEFAULT 'abs',"
+            "payload TEXT NOT NULL DEFAULT '{}',"
+            "saved_at REAL NOT NULL)"
+        )
 
     # -- podcasts ----------------------------------------------------------
 
@@ -261,6 +307,9 @@ class Library:
         with self._lock, self._db:
             self._db.execute(
                 "DELETE FROM podcast_subs WHERE feed_url = ?", (feed_url,))
+            self._db.execute(
+                "DELETE FROM podcast_folder_items WHERE feed_url = ?",
+                (feed_url,))
 
     def is_podcast_subscribed(self, feed_url: str) -> bool:
         with self._lock:
@@ -434,6 +483,191 @@ class Library:
                 out.append(Track.from_dict(json.loads(payload)))
             except (TypeError, ValueError, json.JSONDecodeError):
                 continue
+        return out
+
+    # -- podcast folders ---------------------------------------------------
+
+    def create_podcast_folder(
+        self, name: str, color: str = "#3b82f6",
+    ) -> int:
+        name = (name or "").strip() or "Folder"
+        with self._lock, self._db:
+            cur = self._db.execute(
+                "INSERT INTO podcast_folders (name, color, created_at) "
+                "VALUES (?,?,?)",
+                (name, color or "#3b82f6", time.time()),
+            )
+            return int(cur.lastrowid)
+
+    def rename_podcast_folder(
+        self, folder_id: int, name: str, color: str | None = None,
+    ) -> None:
+        name = (name or "").strip()
+        with self._lock, self._db:
+            if color is not None:
+                self._db.execute(
+                    "UPDATE podcast_folders SET name = ?, color = ? WHERE id = ?",
+                    (name or "Folder", color, folder_id))
+            else:
+                self._db.execute(
+                    "UPDATE podcast_folders SET name = ? WHERE id = ?",
+                    (name or "Folder", folder_id))
+
+    def delete_podcast_folder(self, folder_id: int) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_folder_items WHERE folder_id = ?",
+                (folder_id,))
+            self._db.execute(
+                "DELETE FROM podcast_folders WHERE id = ?", (folder_id,))
+
+    def podcast_folders(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT f.id, f.name, f.color, f.created_at, "
+                "COUNT(i.feed_url) AS n "
+                "FROM podcast_folders f "
+                "LEFT JOIN podcast_folder_items i ON i.folder_id = f.id "
+                "GROUP BY f.id ORDER BY f.created_at ASC"
+            ).fetchall()
+        return [
+            {
+                "id": int(r[0]),
+                "name": r[1],
+                "color": r[2] or "#3b82f6",
+                "created_at": r[3],
+                "count": int(r[4] or 0),
+            }
+            for r in rows
+        ]
+
+    def podcast_folder_feeds(self, folder_id: int) -> list[str]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT feed_url FROM podcast_folder_items "
+                "WHERE folder_id = ?",
+                (folder_id,),
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def podcast_folder_add(self, folder_id: int, feed_url: str) -> None:
+        feed_url = (feed_url or "").strip()
+        if not feed_url:
+            return
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR IGNORE INTO podcast_folder_items "
+                "(folder_id, feed_url) VALUES (?,?)",
+                (folder_id, feed_url),
+            )
+
+    def podcast_folder_remove(self, folder_id: int, feed_url: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_folder_items "
+                "WHERE folder_id = ? AND feed_url = ?",
+                (folder_id, feed_url),
+            )
+
+    def podcast_folder_toggle(self, folder_id: int, feed_url: str) -> bool:
+        """Toggle membership; returns True if now in the folder."""
+        feeds = set(self.podcast_folder_feeds(folder_id))
+        if feed_url in feeds:
+            self.podcast_folder_remove(folder_id, feed_url)
+            return False
+        self.podcast_folder_add(folder_id, feed_url)
+        return True
+
+    def remove_podcast_from_all_folders(self, feed_url: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_folder_items WHERE feed_url = ?",
+                (feed_url,),
+            )
+
+    # -- saved audiobooks --------------------------------------------------
+
+    def save_audiobook(
+        self,
+        book_id: str,
+        title: str,
+        *,
+        author: str = "",
+        artwork: str = "",
+        source: str = "abs",
+        payload: dict | None = None,
+    ) -> None:
+        book_id = (book_id or "").strip()
+        if not book_id:
+            return
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO saved_audiobooks "
+                "(book_id, title, author, artwork, source, payload, saved_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    book_id,
+                    title or book_id,
+                    author or "",
+                    artwork or "",
+                    source or "abs",
+                    json.dumps(payload or {}),
+                    time.time(),
+                ),
+            )
+
+    def unsave_audiobook(self, book_id: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM saved_audiobooks WHERE book_id = ?", (book_id,))
+
+    def is_audiobook_saved(self, book_id: str) -> bool:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT 1 FROM saved_audiobooks WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()
+        return row is not None
+
+    def toggle_saved_audiobook(
+        self,
+        book_id: str,
+        title: str,
+        *,
+        author: str = "",
+        artwork: str = "",
+        source: str = "abs",
+        payload: dict | None = None,
+    ) -> bool:
+        if self.is_audiobook_saved(book_id):
+            self.unsave_audiobook(book_id)
+            return False
+        self.save_audiobook(
+            book_id, title, author=author, artwork=artwork,
+            source=source, payload=payload)
+        return True
+
+    def saved_audiobooks(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT book_id, title, author, artwork, source, payload, "
+                "saved_at FROM saved_audiobooks ORDER BY saved_at DESC"
+            ).fetchall()
+        out = []
+        for r in rows:
+            try:
+                payload = json.loads(r[5] or "{}")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                payload = {}
+            out.append({
+                "book_id": r[0],
+                "title": r[1],
+                "author": r[2] or "",
+                "artwork": r[3] or "",
+                "source": r[4] or "abs",
+                "payload": payload,
+                "saved_at": r[6],
+            })
         return out
 
     # -- favorites ---------------------------------------------------------

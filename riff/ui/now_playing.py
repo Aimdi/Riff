@@ -339,7 +339,9 @@ class NowPlayingPanel(Gtk.Box):
         vid = track.video_id
 
         def work():
-            synced, plain = lyrics_mod.fetch_lyrics(track)
+            from .. import config
+            source = str(config.settings.get("lyrics_source", "auto") or "auto")
+            synced, plain = lyrics_mod.fetch_lyrics(track, source=source)
             if not synced and not plain:
                 plain = self.window.api.lyrics(track.video_id)
             return synced, plain

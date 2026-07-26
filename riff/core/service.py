@@ -65,6 +65,9 @@ class PlaybackService:
         self._scrobbled_current = False
         self._last_podcast_save_ts = 0.0
         self._last_smart_queue_ts = 0.0
+        self._podcast_chapters: list = []
+        self._podcast_chapters_for: str | None = None
+        self._chapter_seek_inflight = False
         self.video_mode = False
         from .sleep_timer import SleepTimer
         self.sleep_timer = SleepTimer(self._on_sleep_timer_fire)
@@ -266,6 +269,7 @@ class PlaybackService:
         self._emit(self.position_listeners, pos)
         self._maybe_begin_crossfade(pos)
         self._maybe_save_podcast_progress(pos)
+        self._maybe_skip_podcast_ad(pos)
         self._maybe_smart_queue_inject()
 
     def _on_sleep_timer_fire(self) -> None:
@@ -606,6 +610,7 @@ class PlaybackService:
         run_async(lambda: self.library.record_play(track), name="riff-history")
         self._prefetch_next()
         self._maybe_resume_podcast(track)
+        self._load_podcast_chapters(track)
 
     def _maybe_resume_podcast(self, track: Track) -> None:
         from . import podcast_progress as pp
@@ -625,6 +630,68 @@ class PlaybackService:
             self.engine.seek(seek_to)
         except Exception:  # noqa: BLE001
             log.debug("podcast resume seek failed", exc_info=True)
+
+    def _load_podcast_chapters(self, track: Track) -> None:
+        from . import podcast_progress as pp
+        from . import podcast_chapters as pc
+
+        self._podcast_chapters = []
+        self._podcast_chapters_for = None
+        self._chapter_seek_inflight = False
+        if not pp.is_podcast_track(track):
+            return
+        url = (getattr(track, "chapters_url", "") or "").strip()
+        if not url:
+            return
+        vid = track.video_id
+
+        def work():
+            return pc.fetch_chapters(url)
+
+        def done(chapters) -> None:
+            cur = self.queue.current
+            if cur is None or cur.video_id != vid:
+                return
+            self._podcast_chapters = chapters or []
+            self._podcast_chapters_for = vid
+
+        run_async(work, done, lambda _e: None, name="riff-pod-chapters")
+
+    def _maybe_skip_podcast_ad(self, pos: float) -> None:
+        """Auto-skip Podcasting 2.0 sponsor/ad chapters (mobile parity)."""
+        from . import podcast_chapters as pc
+
+        if not config.settings.get("podcast_auto_skip_ads", True):
+            return
+        if self._chapter_seek_inflight or not self._podcast_chapters:
+            return
+        track = self.queue.current
+        if track is None or track.video_id != self._podcast_chapters_for:
+            return
+        current = pc.chapter_at(self._podcast_chapters, float(pos or 0))
+        if current is None or not current.is_ad:
+            return
+        target = pc.end_of_chapter(self._podcast_chapters, current)
+        if target is None:
+            return
+        total = float(self.engine.duration or track.duration or 0)
+        if total > 0 and target >= total - 0.4:
+            return
+        self._chapter_seek_inflight = True
+        try:
+            self.engine.seek(target)
+        except Exception:  # noqa: BLE001
+            log.debug("podcast ad skip seek failed", exc_info=True)
+        finally:
+            # Brief latch so position ticks don't re-seek mid-jump.
+            def _clear():
+                self._chapter_seek_inflight = False
+                return False
+            try:
+                from gi.repository import GLib
+                GLib.timeout_add(350, _clear)
+            except Exception:  # noqa: BLE001
+                self._chapter_seek_inflight = False
 
     def _maybe_save_podcast_progress(self, pos: float) -> None:
         """Throttle-save podcast position (~every 5s), matching mobile."""

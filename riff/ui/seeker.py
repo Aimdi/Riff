@@ -25,6 +25,15 @@ def _session() -> slskd_mod.SlskdSession | None:
     )
 
 
+def _size_label(n: int) -> str:
+    if n <= 0:
+        return ""
+    mb = n / (1024 * 1024)
+    if mb >= 1024:
+        return f"{mb / 1024:.1f} GB"
+    return f"{mb:.1f} MB"
+
+
 class SeekerPage(Gtk.Box):
     def __init__(self, window):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
@@ -116,21 +125,7 @@ class SeekerPage(Gtk.Box):
                 self._results.append(empty)
                 return
             for hit in hits[:40]:
-                row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-                row.set_margin_top(4)
-                row.set_margin_bottom(4)
-                t = Gtk.Label(label=hit.label)
-                t.add_css_class("heading")
-                t.set_xalign(0.0)
-                t.set_ellipsize(Pango.EllipsizeMode.END)
-                u = Gtk.Label(
-                    label=f"{hit.username} · {len(hit.files)} files")
-                u.add_css_class("caption")
-                u.add_css_class("dim-label")
-                u.set_xalign(0.0)
-                row.append(t)
-                row.append(u)
-                self._results.append(row)
+                self._results.append(self._hit_block(session, hit))
 
         def fail(exc: Exception) -> None:
             self._clear(self._results)
@@ -138,3 +133,62 @@ class SeekerPage(Gtk.Box):
                 "network-error-symbolic", "Search failed", str(exc)))
 
         run_async(work, done, fail, name="riff-slskd-search")
+
+    def _hit_block(
+        self, session: slskd_mod.SlskdSession, hit: slskd_mod.SlskdHit,
+    ) -> Gtk.Widget:
+        block = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        block.set_margin_top(6)
+        block.set_margin_bottom(6)
+        head = Gtk.Label(label=f"{hit.username} · {len(hit.files)} files")
+        head.add_css_class("heading")
+        head.set_xalign(0.0)
+        block.append(head)
+        for f in hit.files[:12]:
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            name = f.filename.split("\\")[-1].split("/")[-1] or f.filename
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            text.set_hexpand(True)
+            t = Gtk.Label(label=name)
+            t.set_xalign(0.0)
+            t.set_ellipsize(Pango.EllipsizeMode.END)
+            text.append(t)
+            meta = _size_label(f.size)
+            if meta:
+                m = Gtk.Label(label=meta)
+                m.add_css_class("caption")
+                m.add_css_class("dim-label")
+                m.set_xalign(0.0)
+                text.append(m)
+            row.append(text)
+            dl = Gtk.Button(label="Download")
+            dl.add_css_class("suggested-action")
+            dl.add_css_class("pill")
+            dl.connect(
+                "clicked",
+                lambda _b, u=hit.username, fn=f.filename, sz=f.size: (
+                    self._enqueue(session, u, fn, sz)))
+            row.append(dl)
+            block.append(row)
+        return block
+
+    def _enqueue(
+        self,
+        session: slskd_mod.SlskdSession,
+        username: str,
+        filename: str,
+        size: int,
+    ) -> None:
+        short = filename.split("\\")[-1].split("/")[-1] or filename
+        self.window.toast(f"Queuing “{short}”…")
+
+        def work():
+            slskd_mod.enqueue_download(session, username, filename, size)
+
+        def done(_=None) -> None:
+            self.window.toast(f"Queued on slskd · {short}")
+
+        def fail(exc: Exception) -> None:
+            self.window.toast(f"Download failed: {exc}")
+
+        run_async(work, done, fail, name="riff-slskd-dl")

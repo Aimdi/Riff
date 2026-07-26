@@ -4,21 +4,30 @@ from __future__ import annotations
 
 import logging
 
-from gi.repository import Gtk, Pango
+from gi.repository import Adw, Gtk, Pango
 
+from .. import config
+from ..core import podcast_download as pod_dl
 from ..core import podcast_progress as pp
 from ..core.models import format_duration
 from ..core.podcast import (
+    PODCAST_GENRES,
     PodcastShow,
     ensure_feed_url,
     fetch_episodes,
     search_shows,
+    top_by_genre,
     top_shows,
 )
 from ..util import run_async
 from .widgets import CoverArt, scroll_wrap, spinner_page, status_page
 
 log = logging.getLogger("riff.podcasts")
+
+_FOLDER_COLORS = (
+    "#3b82f6", "#22c55e", "#eab308", "#f97316", "#ef4444",
+    "#a855f7", "#14b8a6", "#ec4899",
+)
 
 
 class PodcastsPage(Gtk.Box):
@@ -79,6 +88,47 @@ class PodcastsPage(Gtk.Box):
 
         self._results_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.append(self._results_host)
+
+        cat_head = Gtk.Label(label="Categories")
+        cat_head.add_css_class("title-3")
+        cat_head.set_xalign(0.0)
+        box.append(cat_head)
+        chips = Gtk.FlowBox()
+        chips.set_selection_mode(Gtk.SelectionMode.NONE)
+        chips.set_max_children_per_line(6)
+        chips.set_homogeneous(False)
+        for gid, gname in PODCAST_GENRES:
+            btn = Gtk.Button(label=gname)
+            btn.add_css_class("pill")
+            btn.add_css_class("flat")
+            btn.connect(
+                "clicked",
+                lambda _b, i=gid, n=gname: self._open_genre(i, n))
+            chips.append(btn)
+        box.append(chips)
+
+        folders = self.window.library.podcast_folders()
+        fold_head = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        fh = Gtk.Label(label="Folders")
+        fh.add_css_class("title-3")
+        fh.set_xalign(0.0)
+        fh.set_hexpand(True)
+        fold_head.append(fh)
+        new_f = Gtk.Button(label="New folder")
+        new_f.add_css_class("flat")
+        new_f.connect("clicked", self._prompt_new_folder)
+        fold_head.append(new_f)
+        box.append(fold_head)
+        if folders:
+            for folder in folders:
+                box.append(self._folder_row(folder))
+        else:
+            empty_f = Gtk.Label(
+                label="Group subscriptions into folders — "
+                      "use Folder on a show")
+            empty_f.add_css_class("dim-label")
+            empty_f.set_xalign(0.0)
+            box.append(empty_f)
 
         continuing = self.window.library.in_progress_podcasts()
         if continuing:
@@ -219,6 +269,212 @@ class PodcastsPage(Gtk.Box):
         self.window.toast("Podcast queue cleared")
         self._show_hub()
 
+    def _prompt_new_folder(self, *_a) -> None:
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("New podcast folder")
+        dialog.set_body("Name a folder for grouping subscriptions.")
+        entry = Gtk.Entry()
+        entry.set_placeholder_text("Folder name")
+        entry.set_margin_top(8)
+        dialog.set_extra_child(entry)
+        dialog.add_response("cancel", "Cancel")
+        dialog.add_response("create", "Create")
+        dialog.set_response_appearance(
+            "create", Adw.ResponseAppearance.SUGGESTED)
+        dialog.set_default_response("create")
+
+        def on_response(_d, response: str) -> None:
+            if response != "create":
+                return
+            name = (entry.get_text() or "").strip() or "Folder"
+            color = _FOLDER_COLORS[
+                len(self.window.library.podcast_folders()) % len(_FOLDER_COLORS)]
+            self.window.library.create_podcast_folder(name, color)
+            self.window.toast(f"Created “{name}”")
+            self._show_hub()
+
+        dialog.connect("response", on_response)
+        dialog.present(self.window)
+
+    def _folder_row(self, folder: dict) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(3)
+        row.set_margin_bottom(3)
+        icon = Gtk.Image.new_from_icon_name("folder-symbolic")
+        icon.set_pixel_size(28)
+        row.append(icon)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        t = Gtk.Label(label=folder.get("name") or "Folder")
+        t.add_css_class("heading")
+        t.set_xalign(0.0)
+        a = Gtk.Label(label=f"{int(folder.get('count') or 0)} shows")
+        a.add_css_class("dim-label")
+        a.add_css_class("caption")
+        a.set_xalign(0.0)
+        text.append(t)
+        text.append(a)
+        row.append(text)
+        open_btn = Gtk.Button(label="Open")
+        open_btn.add_css_class("flat")
+        open_btn.connect(
+            "clicked",
+            lambda *_: self._open_folder(int(folder["id"])))
+        row.append(open_btn)
+        del_btn = Gtk.Button(label="Delete")
+        del_btn.add_css_class("flat")
+        del_btn.connect(
+            "clicked",
+            lambda *_: (
+                self.window.library.delete_podcast_folder(int(folder["id"])),
+                self.window.toast("Folder deleted"),
+                self._show_hub()))
+        row.append(del_btn)
+        return row
+
+    def _open_folder(self, folder_id: int) -> None:
+        folders = {
+            int(f["id"]): f for f in self.window.library.podcast_folders()}
+        folder = folders.get(folder_id)
+        if not folder:
+            self._show_hub()
+            return
+        feeds = set(self.window.library.podcast_folder_feeds(folder_id))
+        subs = [
+            s for s in self.window.library.podcast_subscriptions()
+            if s.get("feed_url") in feeds
+        ]
+        self._clear(self._detail)
+        self._stack.set_visible_child_name("detail")
+        shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        shell.set_margin_top(12)
+        shell.set_margin_start(16)
+        shell.set_margin_end(16)
+        shell.set_margin_bottom(100)
+        self._detail.append(scroll_wrap(shell))
+        back = Gtk.Button(label="← Podcasts")
+        back.add_css_class("flat")
+        back.set_halign(Gtk.Align.START)
+        back.connect("clicked", lambda *_: self._show_hub())
+        shell.append(back)
+        title = Gtk.Label(label=folder.get("name") or "Folder")
+        title.add_css_class("title-2")
+        title.set_xalign(0.0)
+        shell.append(title)
+        if not subs:
+            empty = Gtk.Label(label="No shows in this folder yet")
+            empty.add_css_class("dim-label")
+            empty.set_xalign(0.0)
+            shell.append(empty)
+            return
+        for row in subs:
+            show = PodcastShow(
+                title=row["title"],
+                author=row.get("author") or "",
+                artwork=row.get("artwork") or "",
+                feed_url=row["feed_url"],
+            )
+            shell.append(self._show_row(show, subscribed=True))
+
+    def _open_genre(self, genre_id: str, genre_name: str) -> None:
+        self._clear(self._detail)
+        self._stack.set_visible_child_name("detail")
+        shell = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        shell.set_margin_top(12)
+        shell.set_margin_start(16)
+        shell.set_margin_end(16)
+        shell.set_margin_bottom(100)
+        self._detail.append(scroll_wrap(shell))
+        back = Gtk.Button(label="← Podcasts")
+        back.add_css_class("flat")
+        back.set_halign(Gtk.Align.START)
+        back.connect("clicked", lambda *_: self._show_hub())
+        shell.append(back)
+        title = Gtk.Label(label=genre_name)
+        title.add_css_class("title-2")
+        title.set_xalign(0.0)
+        shell.append(title)
+        host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        host.append(spinner_page())
+        shell.append(host)
+
+        def work():
+            shows = top_by_genre(genre_id, limit=30)
+            resolved = []
+            for show in shows[:20]:
+                try:
+                    resolved.append(ensure_feed_url(show))
+                except Exception:  # noqa: BLE001
+                    resolved.append(show)
+            return resolved
+
+        def done(shows: list[PodcastShow]) -> None:
+            self._clear(host)
+            if not shows:
+                host.append(status_page(
+                    "network-error-symbolic", "No shows",
+                    "Couldn't load this category."))
+                return
+            for show in shows:
+                if show.feed_url or show.collection_id:
+                    host.append(self._show_row(show))
+
+        def fail(exc: Exception) -> None:
+            self._clear(host)
+            host.append(status_page(
+                "network-error-symbolic", "Couldn't load category", str(exc)))
+
+        run_async(work, done, fail, name="riff-pod-genre")
+
+    def _file_show_to_folder(self, show: PodcastShow) -> None:
+        folders = self.window.library.podcast_folders()
+        if not folders:
+            self.window.library.create_podcast_folder("Favorites", "#3b82f6")
+            folders = self.window.library.podcast_folders()
+        dialog = Adw.AlertDialog()
+        dialog.set_heading("Add to folder")
+        dialog.set_body(show.title or "Podcast")
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        for folder in folders:
+            in_f = show.feed_url in set(
+                self.window.library.podcast_folder_feeds(int(folder["id"])))
+            btn = Gtk.CheckButton(label=folder.get("name") or "Folder")
+            btn.set_active(in_f)
+
+            def _toggle(
+                _b, fid=int(folder["id"]), feed=show.feed_url,
+            ) -> None:
+                self.window.library.podcast_folder_toggle(fid, feed)
+
+            btn.connect("toggled", _toggle)
+            box.append(btn)
+        dialog.set_extra_child(box)
+        dialog.add_response("done", "Done")
+        dialog.set_default_response("done")
+        dialog.present(self.window)
+
+    def _download_episode(self, track) -> None:
+        if pod_dl.is_downloaded(self.window.library, track.video_id):
+            self.window.toast("Already downloaded")
+            return
+        self.window.toast(f"Downloading “{track.title}”…")
+
+        def work():
+            return pod_dl.download_episode(
+                self.window.library,
+                track,
+                str(config.settings.get(
+                    "download_dir", config.DEFAULT_DOWNLOAD_DIR)),
+            )
+
+        def done(path: str) -> None:
+            self.window.toast(f"Saved offline · {path.rsplit('/', 1)[-1]}")
+
+        def fail(exc: Exception) -> None:
+            self.window.toast(f"Download failed: {exc}")
+
+        run_async(work, done, fail, name="riff-pod-dl")
+
     def _queue_track_row(self, track) -> Gtk.Widget:
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         row.set_margin_top(3)
@@ -331,6 +587,12 @@ class PodcastsPage(Gtk.Box):
                         self.window.library.podcast_queue_add(tr),
                         self.window.toast("Added to podcast queue")))
                 row.append(q)
+                dl = Gtk.Button(label="Download")
+                dl.add_css_class("flat")
+                dl.connect(
+                    "clicked",
+                    lambda _b, tr=tracks[i]: self._download_episode(tr))
+                row.append(dl)
                 self._inbox_host.append(row)
 
         run_async(work, done, lambda _e: None, name="riff-pod-inbox")
@@ -409,6 +671,13 @@ class PodcastsPage(Gtk.Box):
         open_btn.add_css_class("flat")
         open_btn.connect("clicked", lambda *_: self._open_show(show))
         row.append(open_btn)
+
+        if show.feed_url:
+            fold = Gtk.Button(label="Folder")
+            fold.add_css_class("flat")
+            fold.connect(
+                "clicked", lambda *_: self._file_show_to_folder(show))
+            row.append(fold)
 
         sub_btn = Gtk.ToggleButton(label="Subscribed" if subscribed else "Subscribe")
         sub_btn.add_css_class("pill")
@@ -552,6 +821,18 @@ class PodcastsPage(Gtk.Box):
                         self.window.library.podcast_queue_add(tr),
                         self.window.toast("Added to podcast queue")))
                 box.append(q)
+                dl_label = (
+                    "Downloaded"
+                    if pod_dl.is_downloaded(
+                        self.window.library, tracks[i].video_id)
+                    else "Download")
+                dl = Gtk.Button(label=dl_label)
+                dl.add_css_class("flat")
+                dl.set_sensitive(dl_label == "Download")
+                dl.connect(
+                    "clicked",
+                    lambda _b, tr=tracks[i]: self._download_episode(tr))
+                box.append(dl)
                 if ep.transcript_url:
                     tr = Gtk.Button(label="Transcript")
                     tr.add_css_class("flat")
