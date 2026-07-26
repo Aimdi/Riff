@@ -17,6 +17,7 @@ from .widgets import (
     CardGrid,
     Carousel,
     CoverArt,
+    DiscoverTrackStrip,
     ForYouStrip,
     TrackList,
     scroll_wrap,
@@ -74,6 +75,7 @@ class HomePage(ContentPage):
         self._box: Gtk.Box | None = None
         self._top: Gtk.Box | None = None
         self._for_you_host: Gtk.Box | None = None
+        self._mix_host: Gtk.Box | None = None
         self._for_you_busy = False
 
     def refresh(self, force: bool = False) -> None:
@@ -123,6 +125,12 @@ class HomePage(ContentPage):
         recent = self.window.library.recent(16)
         if recent:
             top.append(ForYouStrip("Jump back in", recent, self.window))
+
+        # Riff Mobile mixes: Rediscover + Fresh Finds (Zone-B style).
+        self._mix_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        top.append(self._mix_host)
+        self._paint_cached_mixes()
+        self._ensure_home_mixes()
 
         if not sections and not cached:
             # Still show the page shell; For you may fill in shortly.
@@ -389,7 +397,7 @@ class HomePage(ContentPage):
         host.append(row)
 
     def show_for_you(self, tracks: list[Track], *, source: str = "ai") -> None:
-        """Paint a compact horizontal For you strip (not a full track list)."""
+        """Paint For you — Discover list on mobile shell, chips on desktop."""
         host = self._for_you_host
         if host is None or not tracks:
             return
@@ -401,8 +409,63 @@ class HomePage(ContentPage):
             "radio": "From your taste",
             "cache": "AI",
         }.get(source, "")
-        host.append(ForYouStrip(
-            "For you", tracks[:10], self.window, subtitle=subtitle))
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        if mobile:
+            host.append(DiscoverTrackStrip(
+                "Discover", tracks[:12], self.window, subtitle=subtitle))
+        else:
+            host.append(ForYouStrip(
+                "For you", tracks[:10], self.window, subtitle=subtitle))
+
+    def _paint_cached_mixes(self) -> None:
+        from ..core.mixes import load_cached_home_mixes
+
+        host = getattr(self, "_mix_host", None)
+        if host is None:
+            return
+        rows = load_cached_home_mixes(self.window.library)
+        if rows:
+            self._paint_mix_rows(rows)
+
+    def _paint_mix_rows(self, rows: list) -> None:
+        host = getattr(self, "_mix_host", None)
+        if host is None:
+            return
+        while child := host.get_first_child():
+            host.remove(child)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        for _sid, title, tracks in rows:
+            if mobile:
+                host.append(DiscoverTrackStrip(title, tracks, self.window))
+            else:
+                host.append(ForYouStrip(title, tracks, self.window))
+
+    def _ensure_home_mixes(self) -> None:
+        """Background rebuild of Rediscover / Fresh Finds (Riff Mobile)."""
+        from ..core import mixes as mixes_mod
+
+        win = self.window
+        if not mixes_mod.home_mixes_stale(win.library):
+            return
+
+        def work():
+            red = mixes_mod.rediscover_tracks(win.library)
+            fresh: list[Track] = []
+            try:
+                fresh = mixes_mod.fresh_finds(win.service.discovery, limit=24)
+            except Exception:  # noqa: BLE001
+                log.exception("fresh finds failed")
+            rows = mixes_mod.assemble_home_mix_rows(
+                rediscover=red, fresh=fresh, max_rows=2, min_count=4)
+            if rows:
+                mixes_mod.store_home_mixes(win.library, rows)
+            return rows
+
+        def done(rows) -> None:
+            if rows:
+                self._paint_mix_rows(rows)
+
+        run_async(work, done, lambda _e: None, name="riff-home-mixes")
 
     def _ensure_for_you(self) -> None:
         """Background: AI Mix if possible, else radio-based picks."""

@@ -7,20 +7,38 @@ from gi.repository import Gtk, Pango
 from ..core.models import Track, format_duration
 from ..core.player import STATE_LOADING, STATE_PLAYING
 from ..core.queue import REPEAT_ALL, REPEAT_ONE
-from . import iconutil
+from . import iconutil, images
 from .widgets import CoverArt, build_track_menu, heart_button, set_heart_state
 
 
-class FullPlayer(Gtk.Box):
-    """Immersive player surface: large art, transport, queue / lyrics."""
+class FullPlayer(Gtk.Overlay):
+    """Immersive player: art wash backdrop + large art, transport, queue/lyrics."""
 
     def __init__(self, window):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        super().__init__()
         self.window = window
         self.service = window.service
         self._current: Track | None = None
         self._seeking = False
         self.add_css_class("riff-full-player")
+
+        # Backdrop -----------------------------------------------------------
+        self._backdrop = Gtk.Picture()
+        self._backdrop.set_content_fit(Gtk.ContentFit.COVER)
+        self._backdrop.set_can_shrink(True)
+        self._backdrop.add_css_class("riff-full-player-backdrop")
+        self.set_child(self._backdrop)
+
+        scrim = Gtk.Box()
+        scrim.set_hexpand(True)
+        scrim.set_vexpand(True)
+        scrim.add_css_class("riff-full-player-scrim")
+        self.add_overlay(scrim)
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        root.set_hexpand(True)
+        root.set_vexpand(True)
+        self.add_overlay(root)
 
         # Top chrome ----------------------------------------------------------
         top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
@@ -47,7 +65,7 @@ class FullPlayer(Gtk.Box):
         self._menu_btn.set_tooltip_text("Song actions")
         self._menu_btn.set_sensitive(False)
         top.append(self._menu_btn)
-        self.append(top)
+        root.append(top)
 
         scroll = Gtk.ScrolledWindow()
         scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
@@ -61,7 +79,7 @@ class FullPlayer(Gtk.Box):
         body.set_margin_bottom(16)
         body.set_size_request(320, -1)
         scroll.set_child(body)
-        self.append(scroll)
+        root.append(scroll)
 
         self.art = CoverArt(280)
         self.art.set_halign(Gtk.Align.CENTER)
@@ -84,14 +102,14 @@ class FullPlayer(Gtk.Box):
         self._artist.set_max_width_chars(40)
         body.append(self._artist)
 
-        # Seek ----------------------------------------------------------------
         seek_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         seek_row.set_hexpand(True)
         self.pos_label = Gtk.Label(label="0:00")
         self.pos_label.add_css_class("caption")
         self.pos_label.add_css_class("numeric")
         seek_row.append(self.pos_label)
-        self.seek = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.seek = Gtk.Scale.new_with_range(
+            Gtk.Orientation.HORIZONTAL, 0, 100, 1)
         self.seek.set_hexpand(True)
         self.seek.set_draw_value(False)
         self.seek.connect("change-value", self._on_seek)
@@ -102,7 +120,6 @@ class FullPlayer(Gtk.Box):
         seek_row.append(self.dur_label)
         body.append(seek_row)
 
-        # Transport -----------------------------------------------------------
         transport = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=18)
         transport.set_halign(Gtk.Align.CENTER)
         transport.set_margin_top(4)
@@ -143,7 +160,6 @@ class FullPlayer(Gtk.Box):
         transport.append(self.repeat_btn)
         body.append(transport)
 
-        # Queue | Lyrics ------------------------------------------------------
         switch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         switch.set_halign(Gtk.Align.CENTER)
         switch.set_margin_top(10)
@@ -157,12 +173,11 @@ class FullPlayer(Gtk.Box):
         switch.append(self._lyrics_tab)
         body.append(switch)
 
-        hint = Gtk.Label(label="↑ swipe the tabs · Esc closes")
+        hint = Gtk.Label(label="Queue & lyrics · Esc closes")
         hint.add_css_class("caption")
         hint.add_css_class("dim-label")
         body.append(hint)
 
-        # Wire service --------------------------------------------------------
         svc = self.service
         svc.track_listeners.append(self._on_track)
         svc.state_listeners.append(self._on_state)
@@ -195,12 +210,23 @@ class FullPlayer(Gtk.Box):
             return
         self.window._open_full_player_tab("lyrics")
 
+    def _set_backdrop(self, url: str) -> None:
+        if not url:
+            self._backdrop.set_paintable(None)
+            return
+
+        def apply(texture) -> None:
+            self._backdrop.set_paintable(texture)
+
+        images.load_texture(url, 640, apply)
+
     def _on_track(self, track) -> None:
         self._current = track
         if track is None:
             self._title.set_label("Not playing")
             self._artist.set_label("")
             self.art.set_url("")
+            self._set_backdrop("")
             self.fav.set_sensitive(False)
             self._menu_btn.set_sensitive(False)
             self.seek.set_value(0)
@@ -212,6 +238,7 @@ class FullPlayer(Gtk.Box):
         self._title.set_label(track.title or "Unknown")
         self._artist.set_label(track.artist or "")
         self.art.set_url(track.thumbnail)
+        self._set_backdrop(track.thumbnail or "")
         self.seek.set_range(0, max(track.duration, 1))
         self.dur_label.set_label(format_duration(track.duration))
         menu, group = build_track_menu(

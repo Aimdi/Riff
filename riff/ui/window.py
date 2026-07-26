@@ -27,7 +27,7 @@ from .pages import (
 )
 from . import iconutil
 from .full_player import FullPlayer
-from .library_hub import LibraryHub
+from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
 
 CSS = b"""
@@ -35,8 +35,18 @@ CSS = b"""
 .riff-full-player {
     background-color: #0b0b14;
 }
+.riff-full-player-backdrop {
+    opacity: 0.55;
+}
+.riff-full-player-scrim {
+    background: linear-gradient(
+        180deg,
+        alpha(#0b0b14, 0.55) 0%,
+        alpha(#0b0b14, 0.82) 45%,
+        alpha(#0b0b14, 0.94) 100%);
+}
 .riff-full-player-art {
-    border-radius: 16px;
+    border-radius: 14px;
     box-shadow: 0 18px 48px alpha(#000000, 0.55);
 }
 button.riff-full-play {
@@ -44,8 +54,25 @@ button.riff-full-play {
     min-height: 64px;
 }
 .riff-mini-strip {
-    background-color: alpha(#121221, 0.96);
+    background-color: alpha(#121221, 0.94);
     border-top: 1px solid alpha(#ffffff, 0.08);
+}
+.riff-mini-progress {
+    min-height: 2px;
+    padding: 0;
+    margin: 0;
+    opacity: 0.9;
+}
+.riff-mini-progress trough,
+.riff-mini-progress slider {
+    min-height: 2px;
+    border-radius: 0;
+}
+.riff-mini-progress slider {
+    min-width: 0;
+    background: transparent;
+    border: none;
+    box-shadow: none;
 }
 .riff-search-fab {
     min-width: 52px;
@@ -58,17 +85,33 @@ button.riff-full-play {
 }
 .riff-mobile-rail row {
     border-radius: 0;
-    padding: 4px 0;
+    padding: 6px 0;
+    min-height: 64px;
 }
 .riff-mobile-rail row:selected,
 .riff-mobile-rail row:selected:hover {
     background-color: transparent;
     box-shadow: inset 3px 0 0 @accent_bg_color;
 }
+.riff-mobile-rail row:selected .riff-rail-glyph {
+    background-color: alpha(@accent_bg_color, 0.28);
+    border-radius: 12px;
+    padding: 6px;
+}
 .riff-rail-label {
-    font-size: 0.68em;
+    font-size: 0.62em;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.04em;
+}
+.riff-discover-list {
+    background: transparent;
+}
+.riff-discover-list row {
+    border-radius: 10px;
+    margin: 1px 0;
+}
+.riff-discover-list row:hover {
+    background-color: alpha(#ffffff, 0.06);
 }
 .riff-cover {
     border-radius: 8px;
@@ -202,12 +245,14 @@ SIDEBAR_ITEMS = [
     ("dislikes", "Disliked", "action-unavailable-symbolic"),
 ]
 
-# Riff Mobile primary rail (Search is a FAB; the rest live under Library).
+# Riff Mobile primary rail (Search is a FAB; More holds History/Local/…).
 MOBILE_SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
     ("favorites", "Songs", "emblem-favorite-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
-    ("library", "Library", "folder-music-symbolic"),
+    ("albums", "Albums", "media-optical-symbolic"),
+    ("artists", "Artists", "avatar-default-symbolic"),
+    ("library", "More", "open-menu-symbolic"),
 ]
 
 
@@ -245,6 +290,8 @@ class MainWindow(Adw.ApplicationWindow):
             "downloads": LibraryPage(self, "downloads"),
             "dislikes": LibraryPage(self, "dislikes"),
             "library": LibraryHub(self),
+            "albums": AlbumsPage(self),
+            "artists": ArtistsPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
@@ -332,7 +379,11 @@ class MainWindow(Adw.ApplicationWindow):
                 box.set_margin_top(10)
                 box.set_margin_bottom(10)
                 box.set_halign(Gtk.Align.CENTER)
-                box.append(iconutil.image(icon, 18))
+                glyph = Gtk.Box()
+                glyph.add_css_class("riff-rail-glyph")
+                glyph.set_halign(Gtk.Align.CENTER)
+                glyph.append(iconutil.image(icon, 18))
+                box.append(glyph)
                 text = Gtk.Label(label=label)
                 text.add_css_class("riff-rail-label")
                 box.append(text)
@@ -651,8 +702,8 @@ class MainWindow(Adw.ApplicationWindow):
     def _apply_sidebar_mode(self) -> None:
         # Riff Mobile rail is always a compact vertical strip.
         if getattr(self, "_mobile_shell", False) and not self._narrow:
-            self._nav_split.set_min_sidebar_width(72)
-            self._nav_split.set_max_sidebar_width(72)
+            self._nav_split.set_min_sidebar_width(84)
+            self._nav_split.set_max_sidebar_width(84)
             self._app_title.set_visible(False)
             self._collapse_btn.set_visible(False)
             for row, box, text, label in self._nav_rows:

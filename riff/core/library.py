@@ -251,6 +251,37 @@ class Library:
             ).fetchall()
         return [(Track.from_dict(json.loads(r[0])), r[1]) for r in rows]
 
+    def rediscover_tracks(
+        self,
+        *,
+        quiet_days: int = 90,
+        min_lifetime_plays: int = 2,
+        limit: int = 30,
+    ) -> list[Track]:
+        """Familiar tracks quiet for ``quiet_days`` (Riff Mobile rediscover)."""
+        cutoff = time.time() - max(1, quiet_days) * 86400
+        banned = self.disliked_ids()
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT video_id, track_json, COUNT(*) AS plays, "
+                "MAX(played_at) AS last_played "
+                "FROM history GROUP BY video_id "
+                "HAVING plays >= ? AND last_played > 0 AND last_played < ? "
+                "ORDER BY plays DESC, last_played ASC LIMIT ?",
+                (min_lifetime_plays, cutoff, limit * 2),
+            ).fetchall()
+        out: list[Track] = []
+        for video_id, track_json, _plays, _last in rows:
+            if video_id in banned:
+                continue
+            try:
+                out.append(Track.from_dict(json.loads(track_json)))
+            except (ValueError, KeyError, TypeError):
+                continue
+            if len(out) >= limit:
+                break
+        return out
+
     # -- playlist folders (Spotify-style) --------------------------------------
 
     DEFAULT_FOLDER_COLOR = "#38bdf8"
