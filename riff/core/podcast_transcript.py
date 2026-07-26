@@ -197,18 +197,12 @@ def _parse_timestamp(raw: str) -> float | None:
     return h * 3600 + minute * 60 + sec + ms / 1000.0
 
 
-def _strip_html(text: str) -> str:
-    text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", "", text or "")
-    text = re.sub(r"(?s)<[^>]+>", " ", text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
 def _parse_plain_transcript(body: str, *, is_html: bool) -> list[TranscriptCue]:
     text = body
     if is_html or "<p" in text or "<br" in text.lower():
         text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
         text = re.sub(r"</p>", "\n\n", text, flags=re.I)
-        # Strip tags but keep paragraph breaks (unlike _strip_html).
+        # Strip tags but keep paragraph breaks.
         text = re.sub(r"(?is)<(script|style).*?>.*?</\1>", "", text)
         text = re.sub(r"(?s)<[^>]+>", "", text)
     out: list[TranscriptCue] = []
