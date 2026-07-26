@@ -51,6 +51,7 @@ class PlayerBar(Gtk.Box):
         self.service = window.service
         self._seeking = False
         self._current: Track | None = None
+        self._mobile_compact = False
 
         self.add_css_class("riff-player-bar")
         # Never grow with tall album art or multi-line titles.
@@ -63,6 +64,7 @@ class PlayerBar(Gtk.Box):
         seek_row.set_margin_start(12)
         seek_row.set_margin_end(12)
         seek_row.set_margin_top(4)
+        self._seek_row = seek_row
         self.pos_label = Gtk.Label(label="0:00")
         self.pos_label.add_css_class("numeric")
         self.pos_label.add_css_class("caption")
@@ -192,6 +194,7 @@ class PlayerBar(Gtk.Box):
         prev.add_css_class("flat")
         prev.connect("clicked", lambda *_: self.service.previous())
         transport.append(prev)
+        self._prev_btn = prev
 
         self.play_btn = Gtk.Button()
         iconutil.set_button(self.play_btn, "media-playback-start-symbolic")
@@ -206,6 +209,7 @@ class PlayerBar(Gtk.Box):
         nxt.add_css_class("flat")
         nxt.connect("clicked", lambda *_: self.service.next())
         transport.append(nxt)
+        self._next_btn = nxt
 
         self.repeat_btn = Gtk.Button()
         iconutil.set_button(self.repeat_btn, "media-playlist-repeat-symbolic")
@@ -213,6 +217,7 @@ class PlayerBar(Gtk.Box):
         self.repeat_btn.set_tooltip_text("Repeat: off")
         self.repeat_btn.connect("clicked", self._on_repeat)
         transport.append(self.repeat_btn)
+        self._transport = transport
         row.set_center_widget(transport)
 
         # right: volume + lyrics + now playing + queue + mini
@@ -256,7 +261,24 @@ class PlayerBar(Gtk.Box):
         self.mini_btn.set_tooltip_text("Mini player (Alt+Shift+M)")
         self.mini_btn.connect("clicked", lambda *_: self.window.open_mini_player())
         right.append(self.mini_btn)
+        self._right = right
+        # Mobile mini-strip: play + next only (matches Riff Mobile chrome).
+        self._mobile_transport = Gtk.Box(
+            orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        self._mobile_transport.set_valign(Gtk.Align.CENTER)
+        self._mobile_play = Gtk.Button()
+        iconutil.set_button(self._mobile_play, "media-playback-start-symbolic")
+        self._mobile_play.add_css_class("flat")
+        self._mobile_play.connect(
+            "clicked", lambda *_: self.service.toggle_pause())
+        self._mobile_next = Gtk.Button()
+        iconutil.set_button(self._mobile_next, "media-skip-forward-symbolic")
+        self._mobile_next.add_css_class("flat")
+        self._mobile_next.connect("clicked", lambda *_: self.service.next())
+        self._mobile_transport.append(self._mobile_play)
+        self._mobile_transport.append(self._mobile_next)
         row.set_end_widget(right)
+        self._main_row = row
 
         self.append(row)
 
@@ -267,6 +289,42 @@ class PlayerBar(Gtk.Box):
         svc.position_listeners.append(self._on_position)
         svc.duration_listeners.append(self._on_duration)
         self._on_track(None)
+
+    def set_mobile_compact(self, enabled: bool) -> None:
+        """Riff Mobile mini-player: art + meta + play/next; tap opens full player."""
+        self._mobile_compact = bool(enabled)
+        if enabled:
+            self.add_css_class("riff-mini-strip")
+            self._seek_row.set_visible(False)
+            self._transport.set_visible(False)
+            self._main_row.set_center_widget(None)
+            self._main_row.set_end_widget(self._mobile_transport)
+            self.fav_button.set_visible(False)
+            self.track_menu_btn.set_visible(False)
+            self.art_btn.set_tooltip_text("Open Now Playing")
+            self.title_btn.set_tooltip_text("Open Now Playing")
+            try:
+                self.art_btn.disconnect_by_func(self._on_title_clicked)
+            except TypeError:
+                pass
+            try:
+                self.title_btn.disconnect_by_func(self._on_title_clicked)
+            except TypeError:
+                pass
+            self.art_btn.connect("clicked", self._open_full_player)
+            self.title_btn.connect("clicked", self._open_full_player)
+            self.artist_btn.connect("clicked", self._open_full_player)
+        else:
+            self.remove_css_class("riff-mini-strip")
+            self._seek_row.set_visible(True)
+            self._transport.set_visible(True)
+            self._main_row.set_center_widget(self._transport)
+            self._main_row.set_end_widget(self._right)
+            self.fav_button.set_visible(True)
+            self.track_menu_btn.set_visible(True)
+
+    def _open_full_player(self, *_a) -> None:
+        self.window.open_full_player()
 
     # -- service events ----------------------------------------------------
 
@@ -385,6 +443,7 @@ class PlayerBar(Gtk.Box):
                 if state in (STATE_PLAYING, STATE_LOADING)
                 else "media-playback-start-symbolic")
         iconutil.set_button(self.play_btn, icon)
+        iconutil.set_button(self._mobile_play, icon)
 
     def _on_position(self, pos: float) -> None:
         if self._seeking:

@@ -47,6 +47,9 @@ DEFAULTS = {
     "local_music_dir": "~/Music",
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
+    # "mobile" = Riff Mobile shell (rail + mini player + full player);
+    # "desktop" = classic wide Spotify-style shell.
+    "shell_layout": "mobile",
     "theme": "pitch-black",  # see riff/ui/theme.py THEMES
     "profile_name": "",
     "profile_picture": "",

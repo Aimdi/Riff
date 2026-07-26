@@ -51,6 +51,23 @@ class SettingsDialog(Adw.PreferencesDialog):
             if current_theme in self._theme_keys else 0)
         theme_row.connect("notify::selected", self._on_theme)
         appearance.add(theme_row)
+
+        shell = Adw.ComboRow()
+        shell.set_title("Shell layout")
+        shell.set_subtitle(
+            "Mobile matches Riff Mobile (rail, mini player, full Now Playing). "
+            "Restart may be needed after switching.")
+        shell.set_model(Gtk.StringList.new(["Mobile (Riff Mobile)", "Desktop"]))
+        shell_keys = ("mobile", "desktop")
+        current_shell = str(config.settings.get("shell_layout", "mobile"))
+        shell.set_selected(
+            shell_keys.index(current_shell)
+            if current_shell in shell_keys else 0)
+        shell.connect(
+            "notify::selected",
+            lambda row, _p: config.settings.set(
+                "shell_layout", shell_keys[row.get_selected()]))
+        appearance.add(shell)
         page.add(appearance)
 
         # -- playback --------------------------------------------------------

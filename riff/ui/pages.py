@@ -152,7 +152,7 @@ class HomePage(ContentPage):
         self.show_widget(scroll_wrap(box))
         self._load_followed_releases(top)
 
-    def _greeting_header(self) -> Gtk.Label:
+    def _greeting_header(self) -> Gtk.Widget:
         import datetime
 
         hour = datetime.datetime.now().hour
@@ -170,6 +170,15 @@ class HomePage(ContentPage):
         label = Gtk.Label(label=text)
         label.add_css_class("title-1")
         label.set_xalign(0.0)
+        # Riff Mobile Home leads with Discover under the greeting.
+        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
+            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            wrap.append(label)
+            discover = Gtk.Label(label="Discover")
+            discover.add_css_class("title-1")
+            discover.set_xalign(0.0)
+            wrap.append(discover)
+            return wrap
         return label
 
     def _shortcut_grid(self) -> Gtk.Widget | None:
