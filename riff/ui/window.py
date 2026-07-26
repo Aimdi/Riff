@@ -27,6 +27,7 @@ from .pages import (
 )
 from . import iconutil
 from .full_player import FullPlayer
+from .audiobooks import AudiobooksPage
 from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
 from .podcasts import PodcastsPage
@@ -239,6 +240,7 @@ SIDEBAR_ITEMS = [
     ("search", "Search", "system-search-symbolic"),
     ("favorites", "Favorites", "emblem-favorite-symbolic"),
     ("podcasts", "Podcasts", "emblem-music-symbolic"),
+    ("audiobooks", "Audiobooks", "media-optical-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
     ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
@@ -295,6 +297,7 @@ class MainWindow(Adw.ApplicationWindow):
             "albums": AlbumsPage(self),
             "artists": ArtistsPage(self),
             "podcasts": PodcastsPage(self),
+            "audiobooks": AudiobooksPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)

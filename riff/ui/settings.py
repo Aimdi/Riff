@@ -131,6 +131,35 @@ class SettingsDialog(Adw.PreferencesDialog):
         playback.add(folder)
         page.add(playback)
 
+        # -- Audiobookshelf (stub; LibriVox plays without a server) ------------
+        abs_group = Adw.PreferencesGroup()
+        abs_group.set_title("Audiobookshelf")
+        abs_group.set_description(
+            "Optional self-hosted library (Navidrome-style for books). "
+            "LibriVox discover & play works without this. Full sync is next.")
+        abs_host = Adw.EntryRow()
+        abs_host.set_title("Server URL")
+        abs_host.set_text(str(config.settings.get("abs_host", "") or ""))
+        abs_host.set_show_apply_button(True)
+        abs_host.connect("apply", lambda row: self._save(
+            "abs_host", row.get_text().strip()))
+        abs_group.add(abs_host)
+        abs_user = Adw.EntryRow()
+        abs_user.set_title("Username")
+        abs_user.set_text(str(config.settings.get("abs_username", "") or ""))
+        abs_user.set_show_apply_button(True)
+        abs_user.connect("apply", lambda row: self._save(
+            "abs_username", row.get_text().strip()))
+        abs_group.add(abs_user)
+        abs_pass = Adw.PasswordEntryRow()
+        abs_pass.set_title("Password")
+        abs_pass.set_text(str(config.settings.get("abs_password", "") or ""))
+        abs_pass.set_show_apply_button(True)
+        abs_pass.connect("apply", lambda row: self._save(
+            "abs_password", row.get_text()))
+        abs_group.add(abs_pass)
+        page.add(abs_group)
+
         # -- scrobbling ---------------------------------------------------------
         scrobble = Adw.PreferencesGroup()
         scrobble.set_title("Scrobbling")
