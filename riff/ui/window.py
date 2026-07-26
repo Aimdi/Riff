@@ -37,19 +37,19 @@ from .soulsync import SoulSyncPage
 from .torrents import TorrentsPage
 
 CSS = b"""
-/* Riff Mobile surface language on desktop */
+/* Riff Mobile surface language — void black + elevated green */
 .riff-full-player {
-    background-color: #0b0b14;
+    background-color: #000000;
 }
 .riff-full-player-backdrop {
-    opacity: 0.72;
+    opacity: 0.68;
 }
 .riff-full-player-scrim {
     background: linear-gradient(
         180deg,
-        alpha(#000000, 0.35) 0%,
-        alpha(#000000, 0.62) 42%,
-        alpha(#000000, 0.88) 100%);
+        alpha(#000000, 0.28) 0%,
+        alpha(#000000, 0.55) 40%,
+        alpha(#000000, 0.92) 100%);
 }
 .riff-lyric-word {
     opacity: 0.42;
@@ -67,15 +67,32 @@ CSS = b"""
     opacity: 0.65;
 }
 .riff-full-player-art {
-    border-radius: 14px;
+    border-radius: 12px;
     box-shadow: 0 18px 48px alpha(#000000, 0.55);
+}
+.riff-full-player-brand {
+    letter-spacing: -0.03em;
+    font-weight: 800;
+}
+.riff-full-lyrics {
+    min-height: 220px;
+}
+.riff-full-lyrics-line {
+    font-size: 1.15em;
+    opacity: 0.45;
+    margin: 4px 0;
+}
+.riff-full-lyrics-line-active {
+    opacity: 1.0;
+    color: @accent_color;
+    font-weight: 700;
 }
 button.riff-full-play {
     min-width: 64px;
     min-height: 64px;
 }
 .riff-mini-strip {
-    background-color: alpha(#121221, 0.94);
+    background-color: alpha(#16181c, 0.96);
     border-top: 1px solid alpha(#ffffff, 0.08);
 }
 .riff-mini-progress {
@@ -102,7 +119,7 @@ button.riff-full-play {
     box-shadow: 0 8px 24px alpha(#000000, 0.45);
 }
 .riff-mobile-rail {
-    background-color: #0b0b14;
+    background-color: #000000;
 }
 .riff-mobile-rail row {
     border-radius: 0;
@@ -123,6 +140,28 @@ button.riff-full-play {
     font-size: 0.62em;
     font-weight: 700;
     letter-spacing: 0.04em;
+}
+.riff-brand-hero {
+    font-size: 2.1em;
+    font-weight: 800;
+    letter-spacing: -0.04em;
+}
+.riff-zone-label {
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    opacity: 0.55;
+    margin-top: 8px;
+}
+.riff-wave-card {
+    background-color: #16181c;
+    border-radius: 16px;
+    padding: 14px;
+}
+.riff-wave-play {
+    min-width: 48px;
+    min-height: 48px;
+    border-radius: 9999px;
 }
 .riff-discover-list {
     background: transparent;
@@ -218,22 +257,23 @@ button.riff-cover-link {
     font-size: 17px;
     font-weight: 700;
 }
-/* Spotify-style Home shortcut tiles (greeting grid). */
+/* Home shortcut tiles — elevated chips, green signature (not purple). */
 button.riff-shortcut {
-    background-color: alpha(currentColor, 0.07);
-    border-radius: 8px;
+    background-color: alpha(#ffffff, 0.06);
+    border-radius: 12px;
     padding: 0;
     min-height: 56px;
     transition: background-color 120ms ease;
 }
 button.riff-shortcut:hover {
-    background-color: alpha(currentColor, 0.15);
+    background-color: alpha(#ffffff, 0.12);
 }
 .riff-liked-tile {
-    background: linear-gradient(135deg, #4526c8, #9a6aff);
-    border-radius: 8px;
+    background: linear-gradient(135deg, #0a7a3a, #1db954);
+    border-radius: 10px;
     color: #ffffff;
     font-size: 20px;
+    font-weight: 700;
 }
 .riff-tile-recent {
     background: linear-gradient(135deg, #1f6feb, #58a6ff);
@@ -247,9 +287,15 @@ button.riff-shortcut:hover {
 .riff-tile-radar {
     background: linear-gradient(135deg, #be123c, #fb7185);
 }
+.riff-tile-downloads {
+    background: linear-gradient(135deg, #334155, #64748b);
+}
 .riff-greeting {
-    opacity: 0.72;
+    opacity: 0.62;
     font-weight: 500;
+}
+button.riff-wave-mood {
+    background-color: alpha(#ffffff, 0.06);
 }
 button.riff-wave-mood:checked {
     background-color: @accent_bg_color;
@@ -557,7 +603,8 @@ class MainWindow(Adw.ApplicationWindow):
             fab.set_halign(Gtk.Align.END)
             fab.set_valign(Gtk.Align.END)
             fab.set_margin_end(18)
-            fab.set_margin_bottom(18)
+            # Clear the mini-player strip so Search isn't buried under chrome.
+            fab.set_margin_bottom(86)
             fab.connect("clicked", lambda *_: self.goto("search"))
             overlay.add_overlay(fab)
             content = overlay
@@ -585,7 +632,7 @@ class MainWindow(Adw.ApplicationWindow):
         sheet_close.set_tooltip_text("Back to player")
         sheet_close.connect("clicked", lambda *_: self.open_full_player())
         sheet_top.append(sheet_close)
-        sheet_title = Gtk.Label(label="Up next & lyrics")
+        sheet_title = Gtk.Label(label="Up next")
         sheet_title.add_css_class("title-3")
         sheet_title.set_hexpand(True)
         sheet_top.append(sheet_title)
@@ -1211,11 +1258,17 @@ class MainWindow(Adw.ApplicationWindow):
             self._right_sync = False
 
     def _open_full_player_tab(self, tab: str) -> None:
-        """Queue / Lyrics sheet over the full player (mobile)."""
+        """Queue sheet over the full player; lyrics stay in-player."""
+        if tab == "lyrics":
+            # Mobile: lyrics swap in place on the full player stage.
+            self._restore_now_panel_to_split()
+            self._shell_stack.set_visible_child_name("player")
+            self.full_player.show_tab("lyrics")
+            return
         self._park_now_panel_in_sheet()
-        self.now_playing_panel.show_tab(tab)
+        self.now_playing_panel.show_tab("queue")
         self.now_playing_panel.refresh()
-        self.full_player.show_tab(tab)
+        self.full_player.show_tab("queue")
         self._shell_stack.set_visible_child_name("sheet")
 
     def _park_now_panel_in_sheet(self) -> None:

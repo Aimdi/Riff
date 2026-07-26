@@ -85,35 +85,37 @@ class HomePage(ContentPage):
 
     def _present(self, sections) -> None:
         self._loaded = True
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        box.set_margin_top(18)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        box.set_margin_top(14)
         box.set_margin_bottom(120)
         box.set_margin_start(18)
         box.set_margin_end(18)
 
-        # Greeting + shortcuts, then Wave / AI Mix, then Zone-B mixes.
-        try:
-            box.append(self._greeting_header())
-            shortcuts = self._shortcut_grid()
-            if shortcuts is not None:
-                box.append(shortcuts)
-        except Exception:  # noqa: BLE001 — Home must render regardless
-            log.exception("shortcut grid failed")
-
-        # Top strip: Wave (mobile) / AI Mix → Jump back in → Zone B → YT home.
-        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         box.append(top)
         self._top = top
         self._box = box
 
+        # First viewport (mobile): brand → Wave → shortcuts. Everything else
+        # sits below the fold so Home reads as one composition, not a dashboard.
+        try:
+            top.append(self._greeting_header())
+            if mobile:
+                top.append(self._riff_wave_hero())
+            shortcuts = self._shortcut_grid()
+            if shortcuts is not None:
+                top.append(shortcuts)
+        except Exception:  # noqa: BLE001 — Home must render regardless
+            log.exception("home hero failed")
+
+        if mobile:
+            top.append(self._zone_label("FOR YOU"))
+        else:
+            top.append(self._ai_mix_hero())
+
         self._for_you_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top.append(self._for_you_host)
-
-        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
-        if mobile:
-            top.append(self._riff_wave_hero())
-        # Made for you / AI Mix hero — still available (desktop flagship).
-        top.append(self._ai_mix_hero())
 
         # Instant paint from cache, then refresh in the background.
         cached = self._cached_for_you()
@@ -128,32 +130,37 @@ class HomePage(ContentPage):
         if recent:
             top.append(ForYouStrip("Jump back in", recent, self.window))
 
-        # Riff Mobile mixes: Rediscover + Fresh Finds (Zone-B style).
-        self._mix_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        # Zone-B mixes (Rediscover / Fresh Finds / daily…).
+        self._mix_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         top.append(self._mix_host)
         self._paint_cached_mixes()
         self._ensure_home_mixes()
 
-        if not sections and not cached:
-            # Still show the page shell; For you may fill in shortly.
-            pass
+        explore_sections = list(sections or [])
+        if mobile and explore_sections:
+            top.append(self._zone_label("EXPLORE"))
+            # One composition below the fold — don't dump the whole YT home.
+            explore_sections = explore_sections[:3]
 
-        for section in sections or []:
+        for section in explore_sections:
             tracks = [i for i in section.items if isinstance(i, Track)]
             others = [i for i in section.items if not isinstance(i, Track)]
             if others:
                 box.append(Carousel(section.title, others, self.window))
             elif tracks:
-                title = Gtk.Label(label=section.title)
-                title.add_css_class("title-3")
-                title.set_xalign(0.0)
-                box.append(title)
-                tl = TrackList(self.window, radio_on_single=True)
-                tl.set_tracks(tracks[:10])
-                box.append(tl)
+                if mobile:
+                    box.append(DiscoverTrackStrip(
+                        section.title, tracks[:10], self.window))
+                else:
+                    title = Gtk.Label(label=section.title)
+                    title.add_css_class("title-3")
+                    title.set_xalign(0.0)
+                    box.append(title)
+                    tl = TrackList(self.window, radio_on_single=True)
+                    tl.set_tracks(tracks[:10])
+                    box.append(tl)
 
         if not sections and not cached:
-            # Placeholder under For you if YT home is empty too.
             empty = status_page(
                 "emblem-music-symbolic", "Loading your feed…",
                 "Personal picks appear above as soon as they're ready.")
@@ -161,6 +168,12 @@ class HomePage(ContentPage):
 
         self.show_widget(scroll_wrap(box))
         self._load_followed_releases(top)
+
+    def _zone_label(self, text: str) -> Gtk.Widget:
+        label = Gtk.Label(label=text)
+        label.add_css_class("riff-zone-label")
+        label.set_xalign(0.0)
+        return label
 
     def _greeting_header(self) -> Gtk.Widget:
         import datetime
@@ -177,20 +190,21 @@ class HomePage(ContentPage):
         name = str(config.settings.get("profile_name", "") or "").strip()
         if name:
             text = f"{text}, {name.split()[0]}"
+        # Mobile: brand is the hero signal; greeting is a quiet caption.
+        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
+            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            wrap.set_margin_bottom(2)
+            brand = Gtk.Label(label="Riff")
+            brand.add_css_class("riff-brand-hero")
+            brand.set_xalign(0.0)
+            wrap.append(brand)
+            greet = Gtk.Label(label=text)
+            greet.add_css_class("riff-greeting")
+            greet.set_xalign(0.0)
+            wrap.append(greet)
+            return wrap
         label = Gtk.Label(label=text)
         label.set_xalign(0.0)
-        # Riff Mobile Home leads with Discover under the greeting.
-        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
-            label.add_css_class("title-3")
-            label.add_css_class("riff-greeting")
-            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            wrap.set_margin_bottom(6)
-            wrap.append(label)
-            discover = Gtk.Label(label="Discover")
-            discover.add_css_class("title-1")
-            discover.set_xalign(0.0)
-            wrap.append(discover)
-            return wrap
         label.add_css_class("title-1")
         return label
 
@@ -246,7 +260,7 @@ class HomePage(ContentPage):
                 ("Release Radar", radar_thumbs or None,
                  "◎" if not radar_thumbs else None, "riff-tile-radar",
                  lambda: _play_or_goto(radar, "artists", "release_radar")),
-                ("Downloads", None, "↓", "riff-liked-tile",
+                ("Downloads", None, "↓", "riff-tile-downloads",
                  lambda: window.goto("downloads")),
             ]
         else:
@@ -308,29 +322,54 @@ class HomePage(ContentPage):
         return grid
 
     def _riff_wave_hero(self) -> Gtk.Widget:
-        """Riff Wave — one-tap personal radio (mobile hero)."""
-        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
-        card.set_margin_top(4)
-        card.set_margin_bottom(4)
+        """Riff Wave — mobile-style product hero (art + play + moods)."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("riff-wave-card")
+        card.set_margin_top(2)
+        card.set_margin_bottom(2)
 
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        art = CoverArt(72)
+        thumbs = [
+            t.thumbnail for t in self.window.library.recent(6) if t.thumbnail]
+        if not thumbs:
+            thumbs = [
+                t.thumbnail for t in self.window.library.favorites()[:6]
+                if t.thumbnail]
+        if thumbs:
+            art.set_urls(thumbs[:4])
+        row.append(art)
+
+        meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        meta.set_hexpand(True)
+        meta.set_valign(Gtk.Align.CENTER)
         title = Gtk.Label(label="Riff Wave")
-        title.add_css_class("title-2")
+        title.add_css_class("title-3")
         title.set_xalign(0.0)
-        card.append(title)
-        sub = Gtk.Label(
-            label="Personal radio from your taste — familiar, balanced, "
-                  "or adventurous.")
+        meta.append(title)
+        sub = Gtk.Label(label="Personal radio from your taste")
         sub.add_css_class("dim-label")
-        sub.set_wrap(True)
+        sub.add_css_class("caption")
         sub.set_xalign(0.0)
-        card.append(sub)
+        sub.set_wrap(True)
+        meta.append(sub)
+        row.append(meta)
+
+        play = Gtk.Button()
+        iconutil.set_button(play, "media-playback-start-symbolic")
+        play.add_css_class("suggested-action")
+        play.add_css_class("riff-wave-play")
+        play.set_tooltip_text("Start Wave")
+        play.set_valign(Gtk.Align.CENTER)
+        play.connect("clicked", self._on_start_wave)
+        row.append(play)
+        card.append(row)
 
         moods = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         try:
             current = float(config.settings.get("exploration", 0.3) or 0.3)
         except (TypeError, ValueError):
             current = 0.3
-        # Nearest mood wins as the checked toggle.
         options = (("Familiar", 0.15), ("Balanced", 0.5), ("Adventurous", 0.85))
         nearest = min(options, key=lambda ov: abs(ov[1] - current))[0]
         group: Gtk.ToggleButton | None = None
@@ -351,13 +390,6 @@ class HomePage(ContentPage):
             btn.connect("toggled", _pick)
             moods.append(btn)
         card.append(moods)
-
-        play = Gtk.Button(label="Start Wave")
-        play.add_css_class("suggested-action")
-        play.add_css_class("pill")
-        play.set_halign(Gtk.Align.START)
-        play.connect("clicked", self._on_start_wave)
-        card.append(play)
         return card
 
     def _on_start_wave(self, *_a) -> None:

@@ -12,7 +12,7 @@ from .widgets import CoverArt, build_track_menu, heart_button, set_heart_state
 
 
 class FullPlayer(Gtk.Overlay):
-    """Immersive player: art wash backdrop + large art, transport, queue/lyrics."""
+    """Immersive player: art wash + large art (or lyrics), transport, queue."""
 
     def __init__(self, window):
         super().__init__()
@@ -20,6 +20,12 @@ class FullPlayer(Gtk.Overlay):
         self.service = window.service
         self._current: Track | None = None
         self._seeking = False
+        self._lyrics_showing = False
+        self._lyrics_seq = 0
+        self._lyrics_lines: list[tuple[float, str]] = []
+        self._lyrics_labels: list[Gtk.Label] = []
+        self._lyrics_idx = -1
+        self._lyrics_for = ""
         self.add_css_class("riff-full-player")
 
         # Backdrop -----------------------------------------------------------
@@ -56,6 +62,7 @@ class FullPlayer(Gtk.Overlay):
         top.append(close)
         brand = Gtk.Label(label="Riff")
         brand.add_css_class("title-3")
+        brand.add_css_class("riff-full-player-brand")
         brand.set_hexpand(True)
         brand.set_xalign(0.5)
         top.append(brand)
@@ -81,10 +88,32 @@ class FullPlayer(Gtk.Overlay):
         scroll.set_child(body)
         root.append(scroll)
 
+        # Art ↔ lyrics stage (mobile LyricsSwitch).
+        self._stage = Gtk.Stack()
+        self._stage.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
+        self._stage.set_transition_duration(180)
         self.art = CoverArt(280)
         self.art.set_halign(Gtk.Align.CENTER)
         self.art.add_css_class("riff-full-player-art")
-        body.append(self.art)
+        self._stage.add_named(self.art, "art")
+
+        lyrics_scroll = Gtk.ScrolledWindow()
+        lyrics_scroll.set_policy(
+            Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        lyrics_scroll.set_size_request(280, 280)
+        lyrics_scroll.add_css_class("riff-full-lyrics")
+        self._lyrics_box = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._lyrics_box.set_margin_start(8)
+        self._lyrics_box.set_margin_end(8)
+        self._lyrics_status = Gtk.Label(label="")
+        self._lyrics_status.add_css_class("dim-label")
+        self._lyrics_status.set_wrap(True)
+        self._lyrics_status.set_justify(Gtk.Justification.CENTER)
+        self._lyrics_box.append(self._lyrics_status)
+        lyrics_scroll.set_child(self._lyrics_box)
+        self._stage.add_named(lyrics_scroll, "lyrics")
+        body.append(self._stage)
 
         self._title = Gtk.Label(label="Not playing")
         self._title.add_css_class("title-1")
@@ -160,45 +189,32 @@ class FullPlayer(Gtk.Overlay):
         transport.append(self.repeat_btn)
         body.append(transport)
 
+        # Primary actions only — sleep/speed/transcript live in More.
         switch = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
         switch.set_halign(Gtk.Align.CENTER)
-        switch.set_margin_top(10)
-        self._queue_tab = Gtk.ToggleButton(label="Queue")
-        self._queue_tab.add_css_class("pill")
-        self._lyrics_tab = Gtk.ToggleButton(label="Lyrics")
-        self._lyrics_tab.add_css_class("pill")
-        self._lyrics_tab.set_group(self._queue_tab)
-        self._queue_tab.set_active(True)
-        switch.append(self._queue_tab)
-        switch.append(self._lyrics_tab)
-        self._transcript_btn = Gtk.Button(label="Transcript")
-        self._transcript_btn.add_css_class("pill")
-        self._transcript_btn.set_visible(False)
-        self._transcript_btn.connect("clicked", self._on_transcript)
-        switch.append(self._transcript_btn)
-        self._sleep_btn = Gtk.MenuButton(label="Sleep")
-        self._sleep_btn.add_css_class("pill")
-        self._sleep_btn.set_menu_model(self._build_sleep_menu())
-        switch.append(self._sleep_btn)
-        self._speed_btn = Gtk.MenuButton(label="1×")
-        self._speed_btn.add_css_class("pill")
-        self._speed_btn.set_tooltip_text("Playback speed")
-        self._speed_btn.set_menu_model(self._build_speed_menu())
-        self._install_speed_actions()
-        switch.append(self._speed_btn)
+        switch.set_margin_top(12)
+        self._queue_btn = Gtk.Button(label="Queue")
+        self._queue_btn.add_css_class("pill")
+        self._queue_btn.connect(
+            "clicked", lambda *_: self.window._open_full_player_tab("queue"))
+        switch.append(self._queue_btn)
+        self._lyrics_btn = Gtk.ToggleButton(label="Lyrics")
+        self._lyrics_btn.add_css_class("pill")
+        self._lyrics_btn.connect("toggled", self._on_lyrics_toggle)
+        switch.append(self._lyrics_btn)
+        self._more_btn = Gtk.MenuButton(label="More")
+        self._more_btn.add_css_class("pill")
+        self._more_btn.set_menu_model(self._build_more_menu())
+        self._install_player_actions()
+        switch.append(self._more_btn)
         body.append(switch)
+
+        # Keep sleep/speed widgets for label refresh (hidden; used by More).
+        self._sleep_btn = self._more_btn
+        self._speed_btn = self._more_btn
+        self._transcript_btn = self._more_btn
         self._sleep_tick_id = None
-        self._refresh_speed_label()
-
-        self._similar_host = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=6)
-        self._similar_host.set_margin_top(8)
-        body.append(self._similar_host)
-
-        hint = Gtk.Label(label="Queue · lyrics · sleep · speed · Esc closes")
-        hint.add_css_class("caption")
-        hint.add_css_class("dim-label")
-        body.append(hint)
+        self._similar_host = Gtk.Box()  # unused; kept for API compatibility
 
         svc = self.service
         svc.track_listeners.append(self._on_track)
@@ -206,32 +222,26 @@ class FullPlayer(Gtk.Overlay):
         svc.position_listeners.append(self._on_position)
         svc.duration_listeners.append(self._on_duration)
 
-        self._tab_sync = False
-        self._queue_tab.connect("toggled", self._on_queue_tab)
-        self._lyrics_tab.connect("toggled", self._on_lyrics_tab)
-
         self._on_track(svc.current_track)
         self._start_sleep_ticker()
 
     def show_tab(self, name: str) -> None:
-        self._tab_sync = True
-        try:
-            if name == "lyrics":
-                self._lyrics_tab.set_active(True)
-            else:
-                self._queue_tab.set_active(True)
-        finally:
-            self._tab_sync = False
-
-    def _on_queue_tab(self, btn: Gtk.ToggleButton) -> None:
-        if self._tab_sync or not btn.get_active():
+        """Sync chrome when the shell opens queue sheet or lyrics stage."""
+        if name == "lyrics":
+            if not self._lyrics_btn.get_active():
+                self._lyrics_btn.set_active(True)
             return
-        self.window._open_full_player_tab("queue")
+        # Queue lives in the shell sheet — keep art stage visible.
+        if self._lyrics_btn.get_active():
+            self._lyrics_btn.set_active(False)
 
-    def _on_lyrics_tab(self, btn: Gtk.ToggleButton) -> None:
-        if self._tab_sync or not btn.get_active():
-            return
-        self.window._open_full_player_tab("lyrics")
+    def _on_lyrics_toggle(self, btn: Gtk.ToggleButton) -> None:
+        self._lyrics_showing = bool(btn.get_active())
+        if self._lyrics_showing:
+            self._stage.set_visible_child_name("lyrics")
+            self._ensure_lyrics()
+        else:
+            self._stage.set_visible_child_name("art")
 
     def _set_backdrop(self, url: str) -> None:
         if not url:
@@ -241,7 +251,6 @@ class FullPlayer(Gtk.Overlay):
         def apply(texture) -> None:
             self._backdrop.set_paintable(texture)
 
-        # Soft wash (Vivi / Monochrome ambient canvas lite).
         images.load_blurred_texture(url, apply)
 
     def _start_sleep_ticker(self) -> None:
@@ -258,20 +267,16 @@ class FullPlayer(Gtk.Overlay):
         self._refresh_sleep_label()
 
     def _refresh_sleep_label(self) -> None:
-        st = self.service.sleep_timer.state
-        if not st.active:
-            self._sleep_btn.set_label("Sleep")
-            return
-        left = self.service.sleep_timer.remaining_seconds()
-        if left is None:
-            self._sleep_btn.set_label("Sleep · EOS")
-            return
-        mins = int(left) // 60
-        secs = int(left) % 60
-        self._sleep_btn.set_label(f"Sleep · {mins}:{secs:02d}")
+        # Sleep state is shown via toast / More menu; keep ticker harmless.
+        return
 
     def _on_track(self, track) -> None:
         self._current = track
+        self._lyrics_seq += 1
+        self._lyrics_lines = []
+        self._lyrics_labels = []
+        self._lyrics_idx = -1
+        self._lyrics_for = ""
         if track is None:
             self._title.set_label("Not playing")
             self._artist.set_label("")
@@ -279,9 +284,7 @@ class FullPlayer(Gtk.Overlay):
             self._set_backdrop("")
             self.fav.set_sensitive(False)
             self._menu_btn.set_sensitive(False)
-            self._transcript_btn.set_visible(False)
-            while child := self._similar_host.get_first_child():
-                self._similar_host.remove(child)
+            self._clear_lyrics_body("Nothing is playing")
             self.seek.set_value(0)
             self.pos_label.set_label("0:00")
             self.dur_label.set_label("0:00")
@@ -303,14 +306,14 @@ class FullPlayer(Gtk.Overlay):
             self.window.library.is_favorite(track.video_id)
             if track.video_id else False,
         )
-        self._transcript_btn.set_visible(
-            bool(getattr(track, "transcript_url", "") or ""))
-        self._load_similar(track)
+        if self._lyrics_showing:
+            self._ensure_lyrics()
 
     def _on_transcript(self, *_a) -> None:
         track = self._current
         url = getattr(track, "transcript_url", "") if track else ""
         if not track or not url:
+            self.window.toast("No transcript for this episode")
             return
         from .transcript import open_transcript
         open_transcript(
@@ -320,35 +323,38 @@ class FullPlayer(Gtk.Overlay):
             title=track.title or "",
         )
 
-    def _build_sleep_menu(self):
+    def _build_more_menu(self):
         from gi.repository import Gio
         from ..core.sleep_timer import PRESETS_MINUTES
 
         menu = Gio.Menu()
+        sleep = Gio.Menu()
         for mins in PRESETS_MINUTES:
-            menu.append(f"{mins} minutes", f"win.sleep-timer::{mins}")
-        menu.append("End of song", "win.sleep-timer::eos")
-        menu.append("Cancel", "win.sleep-timer::cancel")
+            sleep.append(f"{mins} minutes", f"win.sleep-timer::{mins}")
+        sleep.append("End of song", "win.sleep-timer::eos")
+        sleep.append("Cancel", "win.sleep-timer::cancel")
+        menu.append_submenu("Sleep timer", sleep)
+
+        speed = Gio.Menu()
+        for rate in self._SPEEDS:
+            label = "1×" if rate == 1.0 else f"{rate:g}×"
+            speed.append(label, f"fp.speed::{rate:g}")
+        menu.append_submenu("Playback speed", speed)
+        menu.append("Transcript", "fp.transcript")
         return menu
 
     _SPEEDS = (0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
 
-    def _build_speed_menu(self):
-        from gi.repository import Gio
-
-        menu = Gio.Menu()
-        for rate in self._SPEEDS:
-            label = "1×" if rate == 1.0 else f"{rate:g}×"
-            menu.append(label, f"fp.speed::{rate:g}")
-        return menu
-
-    def _install_speed_actions(self) -> None:
+    def _install_player_actions(self) -> None:
         from gi.repository import Gio, GLib
 
         group = Gio.SimpleActionGroup()
-        action = Gio.SimpleAction.new("speed", GLib.VariantType.new("s"))
-        action.connect("activate", self._on_speed_action)
-        group.add_action(action)
+        speed = Gio.SimpleAction.new("speed", GLib.VariantType.new("s"))
+        speed.connect("activate", self._on_speed_action)
+        group.add_action(speed)
+        transcript = Gio.SimpleAction.new("transcript", None)
+        transcript.connect("activate", lambda *_: self._on_transcript())
+        group.add_action(transcript)
         self.insert_action_group("fp", group)
 
     def _on_speed_action(self, _action, param) -> None:
@@ -357,66 +363,96 @@ class FullPlayer(Gtk.Overlay):
         except (TypeError, ValueError, AttributeError):
             return
         self.service.set_playback_speed(rate)
-        self._refresh_speed_label()
+        label = "1×" if abs(rate - 1.0) < 0.01 else f"{rate:g}×"
+        self.window.toast(f"Speed · {label}")
 
-    def _refresh_speed_label(self) -> None:
-        from .. import config
+    def _clear_lyrics_body(self, status: str = "") -> None:
+        while child := self._lyrics_box.get_first_child():
+            self._lyrics_box.remove(child)
+        self._lyrics_status = Gtk.Label(label=status)
+        self._lyrics_status.add_css_class("dim-label")
+        self._lyrics_status.set_wrap(True)
+        self._lyrics_status.set_justify(Gtk.Justification.CENTER)
+        self._lyrics_box.append(self._lyrics_status)
+        self._lyrics_labels = []
+        self._lyrics_lines = []
+        self._lyrics_idx = -1
 
-        try:
-            rate = float(config.settings.get("playback_speed", 1.0) or 1.0)
-        except (TypeError, ValueError):
-            rate = 1.0
-        if abs(rate - 1.0) < 0.01:
-            self._speed_btn.set_label("1×")
-        else:
-            self._speed_btn.set_label(f"{rate:g}×")
-
-    def _load_similar(self, track: Track) -> None:
-        while child := self._similar_host.get_first_child():
-            self._similar_host.remove(child)
-        if not track or not track.video_id:
+    def _ensure_lyrics(self) -> None:
+        track = self._current
+        if track is None:
+            self._clear_lyrics_body("Nothing is playing")
             return
-        if (track.video_id or "").startswith(
-                ("podcast_", "librivox_", "abs_", "cloud_")):
+        if track.video_id == self._lyrics_for and self._lyrics_lines:
             return
-
-        head = Gtk.Label(label="Similar")
-        head.add_css_class("heading")
-        head.set_xalign(0.0)
-        self._similar_host.append(head)
-        host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-        self._similar_host.append(host)
-        loading = Gtk.Label(label="Finding similar…")
-        loading.add_css_class("dim-label")
-        host.append(loading)
+        self._lyrics_seq += 1
+        seq = self._lyrics_seq
+        self._clear_lyrics_body("Loading lyrics…")
+        vid = track.video_id
 
         from ..util import run_async
+        from ..core import lyrics as lyrics_mod
+        from .. import config
 
         def work():
-            return self.service.discovery.similar_songs(track, limit=6)
+            source = str(config.settings.get("lyrics_source", "auto") or "auto")
+            hit = lyrics_mod.fetch_lyrics_result(track, source=source)
+            if hit is None:
+                plain = self.window.api.lyrics(track.video_id)
+                if plain:
+                    return lyrics_mod.LyricsResult(
+                        synced=[], plain=plain, source="youtube")
+                return None
+            return hit
 
-        def done(tracks: list[Track]) -> None:
-            while child := host.get_first_child():
-                host.remove(child)
-            if not tracks:
-                empty = Gtk.Label(label="No similar tracks yet")
-                empty.add_css_class("dim-label")
-                host.append(empty)
+        def done(hit) -> None:
+            if seq != self._lyrics_seq:
                 return
-            for t in tracks:
-                row = Gtk.Button()
-                row.add_css_class("flat")
-                label = Gtk.Label(
-                    label=f"{t.title} — {t.artist}",
-                    xalign=0.0)
-                label.set_ellipsize(Pango.EllipsizeMode.END)
-                row.set_child(label)
-                row.connect(
-                    "clicked",
-                    lambda _b, tr=t: self.service.play_track_with_radio(tr))
-                host.append(row)
+            self._lyrics_for = vid
+            if hit is None:
+                self._clear_lyrics_body("No lyrics found for this song.")
+                return
+            if hit.synced:
+                self._show_synced(hit.synced)
+            else:
+                self._clear_lyrics_body(
+                    hit.plain or "No lyrics found for this song.")
 
-        run_async(work, done, lambda _e: None, name="riff-similar")
+        run_async(work, done, lambda _e: self._clear_lyrics_body(
+            "Couldn't fetch lyrics"), name="riff-fp-lyrics")
+
+    def _show_synced(self, lines: list[tuple[float, str]]) -> None:
+        while child := self._lyrics_box.get_first_child():
+            self._lyrics_box.remove(child)
+        self._lyrics_lines = lines
+        self._lyrics_labels = []
+        self._lyrics_idx = -1
+        for _t, text in lines:
+            lab = Gtk.Label(label=text or " ")
+            lab.add_css_class("riff-full-lyrics-line")
+            lab.set_wrap(True)
+            lab.set_justify(Gtk.Justification.CENTER)
+            lab.set_xalign(0.5)
+            self._lyrics_box.append(lab)
+            self._lyrics_labels.append(lab)
+
+    def _highlight_lyrics(self, pos: float) -> None:
+        if not self._lyrics_showing or not self._lyrics_lines:
+            return
+        idx = -1
+        for i, (t, _text) in enumerate(self._lyrics_lines):
+            if t <= pos:
+                idx = i
+            else:
+                break
+        if idx == self._lyrics_idx or idx < 0:
+            return
+        if 0 <= self._lyrics_idx < len(self._lyrics_labels):
+            self._lyrics_labels[self._lyrics_idx].remove_css_class(
+                "riff-full-lyrics-line-active")
+        self._lyrics_idx = idx
+        lab = self._lyrics_labels[idx]
+        lab.add_css_class("riff-full-lyrics-line-active")
 
     def _on_state(self, state: str) -> None:
         playing = state in (STATE_PLAYING, STATE_LOADING)
@@ -427,10 +463,10 @@ class FullPlayer(Gtk.Overlay):
         )
 
     def _on_position(self, pos: float) -> None:
-        if self._seeking:
-            return
-        self.seek.set_value(pos)
-        self.pos_label.set_label(format_duration(pos))
+        if not self._seeking:
+            self.seek.set_value(pos)
+            self.pos_label.set_label(format_duration(pos))
+        self._highlight_lyrics(float(pos or 0))
 
     def _on_duration(self, dur: float) -> None:
         if dur > 0:
