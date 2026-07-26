@@ -32,7 +32,9 @@ from .cloud import CloudPage
 from .library_hub import AlbumsPage, ArtistsPage, LibraryHub
 from .player_bar import PlayerBar
 from .podcasts import PodcastsPage
+from .seeker import SeekerPage
 from .soulsync import SoulSyncPage
+from .torrents import TorrentsPage
 
 CSS = b"""
 /* Riff Mobile surface language on desktop */
@@ -245,6 +247,8 @@ SIDEBAR_ITEMS = [
     ("audiobooks", "Audiobooks", "media-optical-symbolic"),
     ("cloud", "Cloud", "network-server-symbolic"),
     ("soulsync", "SoulSync", "folder-download-symbolic"),
+    ("torrents", "Torrents", "folder-download-symbolic"),
+    ("seeker", "Seeker", "network-server-symbolic"),
     ("history", "History", "document-open-recent-symbolic"),
     ("stats", "Stats", "riff-stats-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
@@ -254,9 +258,13 @@ SIDEBAR_ITEMS = [
 ]
 
 # Riff Mobile primary rail (Search is a FAB; More holds History/Local/…).
+# Matches mobile side_nav: Home · Songs · Podcasts · Audiobooks · …
+# (Playlists/Albums/Artists stay reachable; Settings via app menu).
 MOBILE_SIDEBAR_ITEMS = [
     ("home", "Home", "user-home-symbolic"),
     ("favorites", "Songs", "emblem-favorite-symbolic"),
+    ("podcasts", "Podcasts", "emblem-music-symbolic"),
+    ("audiobooks", "Audiobooks", "media-optical-symbolic"),
     ("playlists", "Playlists", "view-list-symbolic"),
     ("albums", "Albums", "media-optical-symbolic"),
     ("artists", "Artists", "avatar-default-symbolic"),
@@ -304,6 +312,8 @@ class MainWindow(Adw.ApplicationWindow):
             "audiobooks": AudiobooksPage(self),
             "cloud": CloudPage(self),
             "soulsync": SoulSyncPage(self),
+            "torrents": TorrentsPage(self),
+            "seeker": SeekerPage(self),
         }
         self.stack = Gtk.Stack()
         self.stack.set_vexpand(True)
@@ -628,6 +638,28 @@ class MainWindow(Adw.ApplicationWindow):
             action = Gio.SimpleAction.new(name, None)
             action.connect("activate", lambda _a, _p, cb=cb: cb())
             self.add_action(action)
+        sleep = Gio.SimpleAction.new(
+            "sleep-timer", GLib.VariantType.new("s"))
+        sleep.connect("activate", self._on_sleep_timer_action)
+        self.add_action(sleep)
+
+    def _on_sleep_timer_action(self, _action, param) -> None:
+        value = param.get_string() if param is not None else "cancel"
+        timer = self.service.sleep_timer
+        if value == "cancel":
+            timer.cancel()
+            self.toast("Sleep timer cancelled")
+            return
+        if value == "eos":
+            timer.start_end_of_song()
+            self.toast("Sleep timer · end of song")
+            return
+        try:
+            mins = int(value)
+        except (TypeError, ValueError):
+            return
+        timer.start_minutes(mins)
+        self.toast(f"Sleep timer · {mins} min")
 
     # -- navigation ------------------------------------------------------------
 

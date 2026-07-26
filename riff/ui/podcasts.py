@@ -90,6 +90,50 @@ class PodcastsPage(Gtk.Box):
             for row in continuing[:12]:
                 box.append(self._continue_row(row))
 
+        queued = self.window.library.podcast_queue_tracks()
+        q_head_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        q_head = Gtk.Label(label="Queue")
+        q_head.add_css_class("title-3")
+        q_head.set_xalign(0.0)
+        q_head.set_hexpand(True)
+        q_head_row.append(q_head)
+        if queued:
+            play_q = Gtk.Button(label="Play queue")
+            play_q.add_css_class("suggested-action")
+            play_q.add_css_class("pill")
+            play_q.connect(
+                "clicked",
+                lambda *_: self.window.service.play_tracks(
+                    list(queued), start=0, source="podcast_queue"))
+            q_head_row.append(play_q)
+            clear_q = Gtk.Button(label="Clear")
+            clear_q.add_css_class("flat")
+            clear_q.connect("clicked", self._clear_podcast_queue)
+            q_head_row.append(clear_q)
+        box.append(q_head_row)
+        if queued:
+            for track in queued[:20]:
+                box.append(self._queue_track_row(track))
+        else:
+            empty_q = Gtk.Label(
+                label="Add episodes with Queue on a show page")
+            empty_q.add_css_class("dim-label")
+            empty_q.set_xalign(0.0)
+            box.append(empty_q)
+
+        inbox_head = Gtk.Label(label="Inbox")
+        inbox_head.add_css_class("title-3")
+        inbox_head.set_xalign(0.0)
+        inbox_head.set_margin_top(8)
+        box.append(inbox_head)
+        self._inbox_host = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        loading_inbox = Gtk.Label(label="Loading inbox…")
+        loading_inbox.add_css_class("dim-label")
+        self._inbox_host.append(loading_inbox)
+        box.append(self._inbox_host)
+        self._load_inbox()
+
         subs = self.window.library.podcast_subscriptions()
         head = Gtk.Label(label="Subscriptions" if subs else "Popular")
         head.add_css_class("title-3")
@@ -169,6 +213,127 @@ class PodcastsPage(Gtk.Box):
                 "network-error-symbolic", "Search failed", str(exc)))
 
         run_async(work, done, fail, name="riff-pod-search")
+
+    def _clear_podcast_queue(self, *_a) -> None:
+        self.window.library.podcast_queue_clear()
+        self.window.toast("Podcast queue cleared")
+        self._show_hub()
+
+    def _queue_track_row(self, track) -> Gtk.Widget:
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        row.set_margin_top(3)
+        row.set_margin_bottom(3)
+        art = CoverArt(40)
+        art.set_url(track.thumbnail)
+        row.append(art)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        t = Gtk.Label(label=track.title)
+        t.add_css_class("heading")
+        t.set_xalign(0.0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        a = Gtk.Label(label=track.artist or "")
+        a.add_css_class("dim-label")
+        a.add_css_class("caption")
+        a.set_xalign(0.0)
+        text.append(t)
+        text.append(a)
+        row.append(text)
+        rm = Gtk.Button(label="Remove")
+        rm.add_css_class("flat")
+        rm.connect(
+            "clicked",
+            lambda *_: (
+                self.window.library.podcast_queue_remove(track.video_id),
+                self._show_hub()))
+        row.append(rm)
+        return row
+
+    def _load_inbox(self) -> None:
+        """Round-robin latest episodes from each subscription (mobile Inbox)."""
+        subs = self.window.library.podcast_subscriptions()
+        if not subs:
+            self._clear(self._inbox_host)
+            empty = Gtk.Label(label="Subscribe to shows to fill your inbox")
+            empty.add_css_class("dim-label")
+            self._inbox_host.append(empty)
+            return
+
+        def work():
+            from ..core.podcast import fetch_episodes
+            buckets: list[list] = []
+            for row in subs[:12]:
+                try:
+                    eps = fetch_episodes(
+                        row["feed_url"],
+                        show_title=row.get("title") or "",
+                        artwork=row.get("artwork") or "",
+                        limit=3)
+                    buckets.append(eps)
+                except Exception:  # noqa: BLE001
+                    continue
+            # Round-robin newest-first per show.
+            merged = []
+            i = 0
+            while len(merged) < 30:
+                added = False
+                for bucket in buckets:
+                    if i < len(bucket):
+                        merged.append(bucket[i])
+                        added = True
+                if not added:
+                    break
+                i += 1
+            return merged
+
+        def done(episodes) -> None:
+            self._clear(self._inbox_host)
+            if not episodes:
+                empty = Gtk.Label(label="Inbox is empty")
+                empty.add_css_class("dim-label")
+                self._inbox_host.append(empty)
+                return
+            tracks = [ep.to_track() for ep in episodes]
+            for i, ep in enumerate(episodes):
+                row = Gtk.Box(
+                    orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+                row.set_margin_top(3)
+                row.set_margin_bottom(3)
+                art = CoverArt(48)
+                art.set_url(ep.artwork)
+                row.append(art)
+                text = Gtk.Box(
+                    orientation=Gtk.Orientation.VERTICAL, spacing=2)
+                text.set_hexpand(True)
+                t = Gtk.Label(label=ep.title)
+                t.add_css_class("heading")
+                t.set_xalign(0.0)
+                t.set_ellipsize(Pango.EllipsizeMode.END)
+                a = Gtk.Label(label=ep.show_title or ep.pub_date or "")
+                a.add_css_class("dim-label")
+                a.add_css_class("caption")
+                a.set_xalign(0.0)
+                text.append(t)
+                text.append(a)
+                row.append(text)
+                play = Gtk.Button(label="Play")
+                play.add_css_class("flat")
+                play.connect(
+                    "clicked",
+                    lambda _b, idx=i: self.window.service.play_tracks(
+                        tracks, start=idx, source="podcast_inbox"))
+                row.append(play)
+                q = Gtk.Button(label="Queue")
+                q.add_css_class("flat")
+                q.connect(
+                    "clicked",
+                    lambda _b, tr=tracks[i]: (
+                        self.window.library.podcast_queue_add(tr),
+                        self.window.toast("Added to podcast queue")))
+                row.append(q)
+                self._inbox_host.append(row)
+
+        run_async(work, done, lambda _e: None, name="riff-pod-inbox")
 
     def _continue_row(self, row: dict) -> Gtk.Widget:
         track = pp.track_from_progress(row)
@@ -379,6 +544,14 @@ class PodcastsPage(Gtk.Box):
                     dur.add_css_class("caption")
                     dur.add_css_class("dim-label")
                     box.append(dur)
+                q = Gtk.Button(label="Queue")
+                q.add_css_class("flat")
+                q.connect(
+                    "clicked",
+                    lambda _b, tr=tracks[i]: (
+                        self.window.library.podcast_queue_add(tr),
+                        self.window.toast("Added to podcast queue")))
+                box.append(q)
                 if ep.transcript_url:
                     tr = Gtk.Button(label="Transcript")
                     tr.add_css_class("flat")

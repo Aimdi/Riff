@@ -176,9 +176,18 @@ class FullPlayer(Gtk.Overlay):
         self._transcript_btn.set_visible(False)
         self._transcript_btn.connect("clicked", self._on_transcript)
         switch.append(self._transcript_btn)
+        self._sleep_btn = Gtk.MenuButton(label="Sleep")
+        self._sleep_btn.add_css_class("pill")
+        self._sleep_btn.set_menu_model(self._build_sleep_menu())
+        switch.append(self._sleep_btn)
         body.append(switch)
 
-        hint = Gtk.Label(label="Queue & lyrics · Esc closes")
+        self._similar_host = Gtk.Box(
+            orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self._similar_host.set_margin_top(8)
+        body.append(self._similar_host)
+
+        hint = Gtk.Label(label="Queue · lyrics · sleep · Esc closes")
         hint.add_css_class("caption")
         hint.add_css_class("dim-label")
         body.append(hint)
@@ -235,6 +244,8 @@ class FullPlayer(Gtk.Overlay):
             self.fav.set_sensitive(False)
             self._menu_btn.set_sensitive(False)
             self._transcript_btn.set_visible(False)
+            while child := self._similar_host.get_first_child():
+                self._similar_host.remove(child)
             self.seek.set_value(0)
             self.pos_label.set_label("0:00")
             self.dur_label.set_label("0:00")
@@ -258,6 +269,7 @@ class FullPlayer(Gtk.Overlay):
         )
         self._transcript_btn.set_visible(
             bool(getattr(track, "transcript_url", "") or ""))
+        self._load_similar(track)
 
     def _on_transcript(self, *_a) -> None:
         track = self._current
@@ -271,6 +283,64 @@ class FullPlayer(Gtk.Overlay):
             type_=getattr(track, "transcript_type", "") or "",
             title=track.title or "",
         )
+
+    def _build_sleep_menu(self):
+        from gi.repository import Gio
+        from ..core.sleep_timer import PRESETS_MINUTES
+
+        menu = Gio.Menu()
+        for mins in PRESETS_MINUTES:
+            menu.append(f"{mins} minutes", f"win.sleep-timer::{mins}")
+        menu.append("End of song", "win.sleep-timer::eos")
+        menu.append("Cancel", "win.sleep-timer::cancel")
+        return menu
+
+    def _load_similar(self, track: Track) -> None:
+        while child := self._similar_host.get_first_child():
+            self._similar_host.remove(child)
+        if not track or not track.video_id:
+            return
+        if (track.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")):
+            return
+
+        head = Gtk.Label(label="Similar")
+        head.add_css_class("heading")
+        head.set_xalign(0.0)
+        self._similar_host.append(head)
+        host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        self._similar_host.append(host)
+        loading = Gtk.Label(label="Finding similar…")
+        loading.add_css_class("dim-label")
+        host.append(loading)
+
+        from ..util import run_async
+
+        def work():
+            return self.service.discovery.similar_songs(track, limit=6)
+
+        def done(tracks: list[Track]) -> None:
+            while child := host.get_first_child():
+                host.remove(child)
+            if not tracks:
+                empty = Gtk.Label(label="No similar tracks yet")
+                empty.add_css_class("dim-label")
+                host.append(empty)
+                return
+            for t in tracks:
+                row = Gtk.Button()
+                row.add_css_class("flat")
+                label = Gtk.Label(
+                    label=f"{t.title} — {t.artist}",
+                    xalign=0.0)
+                label.set_ellipsize(Pango.EllipsizeMode.END)
+                row.set_child(label)
+                row.connect(
+                    "clicked",
+                    lambda _b, tr=t: self.service.play_track_with_radio(tr))
+                host.append(row)
+
+        run_async(work, done, lambda _e: None, name="riff-similar")
 
     def _on_state(self, state: str) -> None:
         playing = state in (STATE_PLAYING, STATE_LOADING)

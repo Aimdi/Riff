@@ -64,7 +64,10 @@ class PlaybackService:
         self._last_completed: str | None = None
         self._scrobbled_current = False
         self._last_podcast_save_ts = 0.0
+        self._last_smart_queue_ts = 0.0
         self.video_mode = False
+        from .sleep_timer import SleepTimer
+        self.sleep_timer = SleepTimer(self._on_sleep_timer_fire)
         self._video: GstVideoPlayer | None = None
         self._using_gst_video = False
         self._video_state = STATE_STOPPED
@@ -263,6 +266,55 @@ class PlaybackService:
         self._emit(self.position_listeners, pos)
         self._maybe_begin_crossfade(pos)
         self._maybe_save_podcast_progress(pos)
+        self._maybe_smart_queue_inject()
+
+    def _on_sleep_timer_fire(self) -> None:
+        """Pause playback when a timed sleep timer expires."""
+        try:
+            if self.engine.state == STATE_PLAYING:
+                self.engine.toggle_pause()
+        except Exception:  # noqa: BLE001
+            log.debug("sleep timer pause failed", exc_info=True)
+        self._emit(self.error_listeners, "Sleep timer — paused")
+
+    def _maybe_smart_queue_inject(self) -> None:
+        """When few tracks remain, inject similar songs (mobile SmartQueue)."""
+        import time
+
+        if not config.settings.get("smart_queue_injection", True):
+            return
+        track = self.queue.current
+        if track is None or not track.video_id:
+            return
+        if (track.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")):
+            return
+        if (track.stream_url or "").startswith(("http://", "https://")):
+            return
+        if track.local_path:
+            return
+        remaining = max(
+            0, len(self.queue.tracks) - self.queue.current_index - 1)
+        if remaining > 2:
+            return
+        now = time.monotonic()
+        if now - self._last_smart_queue_ts < 20.0:
+            return
+        self._last_smart_queue_ts = now
+        seed = track
+
+        def work():
+            return self.discovery.similar_songs(seed, limit=5)
+
+        def done(tracks: list[Track]) -> None:
+            known = {t.video_id for t in self.queue.tracks}
+            fresh = [t for t in tracks if t.video_id and t.video_id not in known][:3]
+            if not fresh:
+                return
+            self._tag_sources(fresh, "smart_queue")
+            self.queue.add_end(fresh)
+
+        run_async(work, done, lambda _e: None, name="riff-smart-queue")
 
     # -- crossfade ------------------------------------------------------------
 
@@ -659,6 +711,15 @@ class PlaybackService:
     def _on_track_ended(self) -> None:
         self._log_play_transition(natural=True)
         self._maybe_scrobble()
+        if self.sleep_timer.on_track_ending():
+            try:
+                if self.engine.state == STATE_PLAYING:
+                    self.engine.toggle_pause()
+            except Exception:  # noqa: BLE001
+                pass
+            self._emit(self.error_listeners, "Sleep timer — paused")
+            self._emit(self.state_listeners, STATE_STOPPED)
+            return
         ended = self.queue.current
         if ended and (ended.video_id or "").startswith("podcast_"):
             self.library.clear_podcast_progress(ended.video_id)

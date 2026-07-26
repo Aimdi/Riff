@@ -108,17 +108,78 @@ def daily_mixes(
     return out
 
 
+def release_radar(
+    api,
+    library: Library,
+    *,
+    limit: int = 30,
+) -> list[Track]:
+    """Song-level Release Radar from followed artists (mobile ensureReleaseRadar)."""
+    follows = library.followed_artists()[:20]
+    if not follows:
+        return []
+    out: list[Track] = []
+    seen: set[str] = set()
+    for browse_id, name, _thumb in follows:
+        try:
+            artist = api.artist(browse_id)
+        except Exception:  # noqa: BLE001
+            continue
+        for track in list(artist.songs or [])[:8]:
+            if not track.video_id or track.video_id in seen:
+                continue
+            if not track.artists:
+                track.artists = [name] if name else []
+            seen.add(track.video_id)
+            out.append(track)
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def quick_picks(
+    engine: DiscoveryEngine,
+    *,
+    limit: int = 20,
+) -> list[Track]:
+    """Dense Quick Picks shelf — recent taste → similar (mobile QP)."""
+    library = engine.library
+    seeds = library.recent(6) or [
+        t for t, _ in library.most_played(limit=6)]
+    if not seeds:
+        seeds = library.favorites()[:6]
+    if not seeds:
+        return []
+    candidates: list[tuple[Track, float]] = []
+    exclude = {t.video_id for t in seeds if t.video_id}
+    for seed in seeds[:6]:
+        for related in engine.related_cached(seed.video_id)[:10]:
+            candidates.append((related, 1.0))
+        for related in engine._cooccurrence_candidates(seed.video_id)[:6]:
+            candidates.append((related, 0.9))
+    return engine.rank(
+        candidates,
+        surface="quick_picks",
+        limit=limit,
+        max_per_artist=2,
+        exclude=exclude,
+        exploration=max(0.2, min(0.5, engine.exploration())),
+    )
+
+
 def assemble_home_mix_rows(
     *,
     rediscover: list[Track],
     fresh: list[Track],
     daily: list[tuple[str, str, list[Track]]] | None = None,
-    max_rows: int = 4,
+    quick: list[Track] | None = None,
+    because: list[Track] | None = None,
+    max_rows: int = 3,
     min_count: int = 4,
 ) -> list[tuple[str, str, list[Track]]]:
-    """Pick up to ``max_rows`` personal mix strips (mobile Zone-B spirit).
+    """Zone-B assembly: Daily Mixes → Quick Picks → one contextual row.
 
-    Returns list of (id, title, tracks).
+    Returns list of (id, title, tracks). Cap matches mobile ``kHomeFeedZoneBCap``.
     """
     rows: list[tuple[str, str, list[Track]]] = []
     used: set[str] = set()
@@ -133,11 +194,23 @@ def assemble_home_mix_rows(
         used.update(t.video_id for t in picked)
         rows.append((section_id, title, picked))
 
-    # Daily Mix leads first (flagship), then Rediscover, then Fresh Finds.
-    for sid, title, tracks in daily or []:
-        take(sid, title, tracks)
-    take("rediscover", "Rediscover", rediscover)
-    take("fresh_finds", "Fresh Finds", fresh)
+    # One Daily Mixes lead row (flagship), then Quick Picks, then one contextual.
+    if daily:
+        # Prefer a combined "Your daily mixes" lead strip from first mix
+        # that has enough tracks (mobile uniqueDailyMixLeads spirit).
+        for sid, title, tracks in daily:
+            take(sid, title, tracks)
+            if rows:
+                break
+    take("quick_picks", "Quick picks", quick or [])
+    # At most one contextual row (Because → Rediscover → Fresh).
+    if len(rows) < max_rows:
+        if because and len([t for t in because if t.video_id]) >= min_count:
+            take("because", "Because you liked", because)
+        elif rediscover:
+            take("rediscover", "Rediscover", rediscover)
+        elif fresh:
+            take("fresh_finds", "Fresh Finds", fresh)
     return rows
 
 
@@ -182,3 +255,29 @@ def store_home_mixes(
         ],
     }
     library.cache_put("home_mixes_v1", payload, 7 * 86400)
+
+
+def load_cached_radar(library: Library) -> list[Track]:
+    hit = library.cache_get("release_radar_v1")
+    if not hit or not isinstance(hit, dict):
+        return []
+    try:
+        return [Track.from_dict(d) for d in hit.get("tracks") or []]
+    except (TypeError, ValueError):
+        return []
+
+
+def store_release_radar(library: Library, tracks: list[Track]) -> None:
+    library.cache_put(
+        "release_radar_v1",
+        {"built_at": time.time(), "tracks": [t.to_dict() for t in tracks]},
+        7 * 86400,
+    )
+
+
+def release_radar_stale(library: Library, *, max_age_days: float = 6.0) -> bool:
+    hit = library.cache_get("release_radar_v1")
+    if not hit or not isinstance(hit, dict):
+        return True
+    built = float(hit.get("built_at", 0) or 0)
+    return (time.time() - built) > max_age_days * 86400

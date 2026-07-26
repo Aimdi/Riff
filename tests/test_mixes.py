@@ -55,12 +55,13 @@ def test_assemble_home_mix_rows_caps_and_dedupes():
     red = [_track(i) for i in range(6)]
     fresh = [_track(i) for i in range(3, 12)]  # overlaps v3..v5
     daily = [("daily_mix_1", "Daily Mix 1", [_track(i) for i in range(20, 28)])]
+    quick = [_track(i) for i in range(40, 50)]
     rows = assemble_home_mix_rows(
-        rediscover=red, fresh=fresh, daily=daily, max_rows=3, min_count=4)
-    assert len(rows) == 3
-    assert rows[0][0] == "daily_mix_1"
-    assert rows[1][0] == "rediscover"
-    assert rows[2][0] == "fresh_finds"
+        rediscover=red, fresh=fresh, daily=daily, quick=quick,
+        max_rows=3, min_count=4)
+    # Zone-B: one Daily Mix + Quick Picks + one contextual (Rediscover).
+    assert [r[0] for r in rows] == [
+        "daily_mix_1", "quick_picks", "rediscover"]
     ids = [{t.video_id for t in r[2]} for r in rows]
     assert not (ids[0] & ids[1])
     assert not (ids[1] & ids[2])

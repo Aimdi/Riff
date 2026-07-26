@@ -122,6 +122,31 @@ class SettingsDialog(Adw.PreferencesDialog):
         radio.connect("notify::active", self._on_radio)
         playback.add(radio)
 
+        smart_q = Adw.SwitchRow()
+        smart_q.set_title("Smart queue")
+        smart_q.set_subtitle(
+            "Automatically add similar songs when few tracks remain "
+            "(Riff Mobile Smart Queue)")
+        smart_q.set_active(
+            bool(config.settings.get("smart_queue_injection", True)))
+        smart_q.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "smart_queue_injection", bool(row.get_active())))
+        playback.add(smart_q)
+
+        pod_cont = Adw.SwitchRow()
+        pod_cont.set_title("Continuous podcasts")
+        pod_cont.set_subtitle(
+            "Advance through the podcast episode queue automatically")
+        pod_cont.set_active(
+            bool(config.settings.get("podcast_continuous", True)))
+        pod_cont.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "podcast_continuous", bool(row.get_active())))
+        playback.add(pod_cont)
+
         folder = Adw.EntryRow()
         folder.set_title("Local music folder")
         folder.set_text(str(config.settings.get("local_music_dir", "~/Music")))
@@ -270,6 +295,38 @@ class SettingsDialog(Adw.PreferencesDialog):
         self._ss_connect_btn = ss_btn
         ss_group.add(self._ss_status)
         page.add(ss_group)
+
+        # -- Seeker / slskd ---------------------------------------------------
+        sk_group = Adw.PreferencesGroup()
+        sk_group.set_title("Seeker (slskd)")
+        sk_group.set_description(
+            "Search Soulseek through a self-hosted slskd instance "
+            "(API key optional depending on your server).")
+        self._sk_host = Adw.EntryRow()
+        self._sk_host.set_title("Server URL")
+        self._sk_host.set_text(
+            str(config.settings.get("slskd_host", "") or ""))
+        self._sk_host.set_show_apply_button(True)
+        self._sk_host.connect("apply", lambda row: self._save(
+            "slskd_host", row.get_text().strip()))
+        sk_group.add(self._sk_host)
+        self._sk_key = Adw.PasswordEntryRow()
+        self._sk_key.set_title("API key (optional)")
+        self._sk_key.set_text(
+            str(config.settings.get("slskd_api_key", "") or ""))
+        self._sk_key.set_show_apply_button(True)
+        self._sk_key.connect("apply", lambda row: self._save(
+            "slskd_api_key", row.get_text()))
+        sk_group.add(self._sk_key)
+        sk_btn = Gtk.Button(label="Connect")
+        sk_btn.add_css_class("suggested-action")
+        sk_btn.set_valign(Gtk.Align.CENTER)
+        sk_row = Adw.ActionRow()
+        sk_row.set_title("Test connection")
+        sk_row.add_suffix(sk_btn)
+        sk_btn.connect("clicked", self._on_slskd_connect)
+        sk_group.add(sk_row)
+        page.add(sk_group)
 
         # -- scrobbling ---------------------------------------------------------
         scrobble = Adw.PreferencesGroup()
@@ -702,6 +759,27 @@ class SettingsDialog(Adw.PreferencesDialog):
             self.window.toast(f"SoulSync: {exc}")
 
         run_async(work, done, fail, name="riff-ss-connect")
+
+    def _on_slskd_connect(self, _btn) -> None:
+        from ..core import slskd as slskd_mod
+
+        host = self._sk_host.get_text().strip()
+        key = self._sk_key.get_text().strip()
+        config.settings.set("slskd_host", host)
+        config.settings.set("slskd_api_key", key)
+
+        def work():
+            return slskd_mod.connect(host, key)
+
+        def done(session) -> None:
+            config.settings.set("slskd_host", session.host)
+            config.settings.set("slskd_api_key", session.api_key)
+            self.window.toast("slskd connected")
+
+        def fail(exc: Exception) -> None:
+            self.window.toast(f"slskd: {exc}")
+
+        run_async(work, done, fail, name="riff-slskd-connect")
 
     def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
         key = self._theme_keys[row.get_selected()]

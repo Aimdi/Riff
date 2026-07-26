@@ -91,8 +91,7 @@ class HomePage(ContentPage):
         box.set_margin_start(18)
         box.set_margin_end(18)
 
-        # Spotify-style greeting + shortcut grid (Liked Songs, AI Mix,
-        # recent playlists), then the personalized strips below.
+        # Greeting + shortcuts, then Wave / AI Mix, then Zone-B mixes.
         try:
             box.append(self._greeting_header())
             shortcuts = self._shortcut_grid()
@@ -101,7 +100,7 @@ class HomePage(ContentPage):
         except Exception:  # noqa: BLE001 — Home must render regardless
             log.exception("shortcut grid failed")
 
-        # Top strip: For you (AI / smart picks) → followed releases → YT home.
+        # Top strip: Wave (mobile) / AI Mix → Jump back in → Zone B → YT home.
         top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
         box.append(top)
         self._top = top
@@ -110,7 +109,10 @@ class HomePage(ContentPage):
         self._for_you_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top.append(self._for_you_host)
 
-        # Made for you / AI Mix hero — flagship surface (out of the menu).
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        if mobile:
+            top.append(self._riff_wave_hero())
+        # Made for you / AI Mix hero — still available (desktop flagship).
         top.append(self._ai_mix_hero())
 
         # Instant paint from cache, then refresh in the background.
@@ -190,75 +192,90 @@ class HomePage(ContentPage):
         return label
 
     def _shortcut_grid(self) -> Gtk.Widget | None:
-        """Spotify's greeting grid: compact cover-left tiles for the stuff
-        you reach for daily — Liked Songs, AI Mix, your playlists."""
+        """Greeting grid — mobile uses the fixed Riff Mobile 6-tile set."""
         from .window import AI_MIX_PLAYLIST
 
         window = self.window
         tiles: list[tuple] = []  # (title, cover, glyph, callback)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
 
-        n_favs = len(window.library.favorites())
-        if n_favs:
-            tiles.append(("Liked Songs", None, "♥",
-                          lambda: window.goto("favorites")))
+        if mobile:
+            from ..core.mixes import load_cached_home_mixes, load_cached_radar
 
-        # Riff Mobile shortcut destinations for personal mixes.
-        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
-            from ..core.mixes import load_cached_home_mixes
+            mix_map = {
+                sid: tracks
+                for sid, _title, tracks in load_cached_home_mixes(window.library)
+            }
+            radar = load_cached_radar(window.library)
 
-            for sid, title, tracks in load_cached_home_mixes(window.library):
-                if len(tiles) >= 8:
-                    break
-                if sid.startswith("daily_mix") or sid in (
-                        "rediscover", "fresh_finds"):
-                    short = {
-                        "rediscover": "Rediscover",
-                        "fresh_finds": "Fresh Finds",
-                    }.get(sid, title.split("·")[0].strip())
+            def _play_or_goto(tracks, fallback_page, source):
+                if tracks:
+                    window.service.play_tracks(
+                        list(tracks), start=0, source=source)
+                else:
+                    window.goto(fallback_page)
+
+            tiles = [
+                ("Favorites", None, "♥",
+                 lambda: window.goto("favorites")),
+                ("Recently played",
+                 [t.thumbnail for t in window.library.recent(8)], None,
+                 lambda: window.goto("history")),
+                ("Fresh Finds",
+                 [t.thumbnail for t in (mix_map.get("fresh_finds") or [])[:8]],
+                 None,
+                 lambda: _play_or_goto(
+                     mix_map.get("fresh_finds"), "explore", "fresh_finds")),
+                ("Rediscover",
+                 [t.thumbnail for t in (mix_map.get("rediscover") or [])[:8]],
+                 None,
+                 lambda: _play_or_goto(
+                     mix_map.get("rediscover"), "favorites", "rediscover")),
+                ("Release Radar",
+                 [t.thumbnail for t in (radar or [])[:8]], None,
+                 lambda: _play_or_goto(radar, "artists", "release_radar")),
+                ("Downloads", None, "↓",
+                 lambda: window.goto("downloads")),
+            ]
+        else:
+            n_favs = len(window.library.favorites())
+            if n_favs:
+                tiles.append(("Liked Songs", None, "♥",
+                              lambda: window.goto("favorites")))
+            seen_names = set()
+            ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
+            if ai_pid is not None:
+                tracks = window.library.playlist_tracks(ai_pid)
+                if tracks:
+                    seen_names.add(AI_MIX_PLAYLIST)
                     tiles.append((
-                        short,
-                        [t.thumbnail for t in tracks[:8]],
-                        None,
-                        lambda ts=list(tracks): window.service.play_tracks(
-                            ts, start=0, source=sid),
-                    ))
-
-        seen_names = set()
-        ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
-        if ai_pid is not None:
-            tracks = window.library.playlist_tracks(ai_pid)
-            if tracks:
-                seen_names.add(AI_MIX_PLAYLIST)
-                tiles.append((
-                    AI_MIX_PLAYLIST,
-                    [t.thumbnail for t in tracks[:8]], None,
-                    lambda p=ai_pid: window.open_local_playlist(
-                        p, AI_MIX_PLAYLIST)))
-
-        for item in window.library.playlist_tree():
-            entries = ([(item["id"], item["name"])]
-                       if item["kind"] == "playlist"
-                       else [(pid, name)
-                             for pid, name, _c in item["playlists"]])
-            for pid, name in entries:
-                if len(tiles) >= 8:
-                    break
-                if name in seen_names:
-                    continue
-                seen_names.add(name)
-                tracks = window.library.playlist_tracks(pid)
-                if not tracks:
-                    continue
-                tiles.append((
-                    name, [t.thumbnail for t in tracks[:8]], None,
-                    lambda p=pid, n=name: window.open_local_playlist(p, n)))
-
-        if len(tiles) < 8:
-            recent = window.library.recent(1)
-            if recent:
-                tiles.append(("Recently played", [
-                    t.thumbnail for t in window.library.recent(8)], None,
-                    lambda: window.goto("history")))
+                        AI_MIX_PLAYLIST,
+                        [t.thumbnail for t in tracks[:8]], None,
+                        lambda p=ai_pid: window.open_local_playlist(
+                            p, AI_MIX_PLAYLIST)))
+            for item in window.library.playlist_tree():
+                entries = ([(item["id"], item["name"])]
+                           if item["kind"] == "playlist"
+                           else [(pid, name)
+                                 for pid, name, _c in item["playlists"]])
+                for pid, name in entries:
+                    if len(tiles) >= 8:
+                        break
+                    if name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    tracks = window.library.playlist_tracks(pid)
+                    if not tracks:
+                        continue
+                    tiles.append((
+                        name, [t.thumbnail for t in tracks[:8]], None,
+                        lambda p=pid, n=name: window.open_local_playlist(p, n)))
+            if len(tiles) < 8:
+                recent = window.library.recent(1)
+                if recent:
+                    tiles.append(("Recently played", [
+                        t.thumbnail for t in window.library.recent(8)], None,
+                        lambda: window.goto("history")))
 
         if not tiles:
             return None
@@ -267,12 +284,74 @@ class HomePage(ContentPage):
         grid.set_selection_mode(Gtk.SelectionMode.NONE)
         grid.set_homogeneous(True)
         grid.set_min_children_per_line(2)
-        grid.set_max_children_per_line(4)
+        grid.set_max_children_per_line(3 if mobile else 4)
         grid.set_column_spacing(10)
         grid.set_row_spacing(10)
         for title, cover, glyph, cb in tiles[:8]:
             grid.append(self._shortcut_tile(title, cover, glyph, cb))
         return grid
+
+    def _riff_wave_hero(self) -> Gtk.Widget:
+        """Riff Wave — one-tap personal radio (mobile hero)."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        card.set_margin_top(4)
+        card.set_margin_bottom(4)
+
+        title = Gtk.Label(label="Riff Wave")
+        title.add_css_class("title-2")
+        title.set_xalign(0.0)
+        card.append(title)
+        sub = Gtk.Label(
+            label="Personal radio from your taste — familiar, balanced, "
+                  "or adventurous.")
+        sub.add_css_class("dim-label")
+        sub.set_wrap(True)
+        sub.set_xalign(0.0)
+        card.append(sub)
+
+        moods = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        for label, value in (
+            ("Familiar", 0.15), ("Balanced", 0.5), ("Adventurous", 0.85),
+        ):
+            btn = Gtk.Button(label=label)
+            btn.add_css_class("pill")
+            btn.connect(
+                "clicked",
+                lambda _b, v=value: config.settings.set("exploration", v))
+            moods.append(btn)
+        card.append(moods)
+
+        play = Gtk.Button(label="Start Wave")
+        play.add_css_class("suggested-action")
+        play.add_css_class("pill")
+        play.set_halign(Gtk.Align.START)
+        play.connect("clicked", self._on_start_wave)
+        card.append(play)
+        return card
+
+    def _on_start_wave(self, *_a) -> None:
+        from ..core import wave as wave_mod
+
+        win = self.window
+        play_btn = None
+
+        def work():
+            return wave_mod.build_wave(
+                win.api, win.library, win.service.discovery,
+                current=win.service.current_track, limit=25)
+
+        def done(tracks: list[Track]) -> None:
+            if not tracks:
+                win.toast("Wave needs a little listening history first")
+                return
+            win.service.play_tracks(tracks, start=0, source="riff_wave")
+            win.toast(f"Wave · {len(tracks)} songs")
+
+        def fail(exc: Exception) -> None:
+            win.toast(f"Wave unavailable: {exc}")
+
+        run_async(work, done, fail, name="riff-wave")
+        _ = play_btn
 
     def _shortcut_tile(self, title: str, cover, glyph, callback):
         btn = Gtk.Button()
@@ -462,30 +541,59 @@ class HomePage(ContentPage):
                 host.append(ForYouStrip(title, tracks, self.window))
 
     def _ensure_home_mixes(self) -> None:
-        """Background rebuild of Rediscover / Fresh Finds (Riff Mobile)."""
+        """Background rebuild of Zone-B mixes + Release Radar (Riff Mobile)."""
         from ..core import mixes as mixes_mod
 
         win = self.window
-        if not mixes_mod.home_mixes_stale(win.library):
+        mixes_need = mixes_mod.home_mixes_stale(win.library)
+        radar_need = mixes_mod.release_radar_stale(win.library)
+        if not mixes_need and not radar_need:
             return
 
         def work():
-            red = mixes_mod.rediscover_tracks(win.library)
-            fresh: list[Track] = []
-            daily: list = []
-            try:
-                fresh = mixes_mod.fresh_finds(win.service.discovery, limit=24)
-            except Exception:  # noqa: BLE001
-                log.exception("fresh finds failed")
-            try:
-                daily = mixes_mod.daily_mixes(win.service.discovery, mix_count=3)
-            except Exception:  # noqa: BLE001
-                log.exception("daily mixes failed")
-            rows = mixes_mod.assemble_home_mix_rows(
-                rediscover=red, fresh=fresh, daily=daily,
-                max_rows=4, min_count=4)
-            if rows:
-                mixes_mod.store_home_mixes(win.library, rows)
+            rows = mixes_mod.load_cached_home_mixes(win.library)
+            if mixes_need:
+                red = mixes_mod.rediscover_tracks(win.library)
+                fresh: list[Track] = []
+                daily: list = []
+                quick: list[Track] = []
+                because: list[Track] = []
+                try:
+                    fresh = mixes_mod.fresh_finds(
+                        win.service.discovery, limit=24)
+                except Exception:  # noqa: BLE001
+                    log.exception("fresh finds failed")
+                try:
+                    daily = mixes_mod.daily_mixes(
+                        win.service.discovery, mix_count=3)
+                except Exception:  # noqa: BLE001
+                    log.exception("daily mixes failed")
+                try:
+                    quick = mixes_mod.quick_picks(
+                        win.service.discovery, limit=20)
+                except Exception:  # noqa: BLE001
+                    log.exception("quick picks failed")
+                try:
+                    seeds = win.library.favorites()[:1] or win.library.recent(1)
+                    if seeds:
+                        because = win.service.discovery.similar_songs(
+                            seeds[0], limit=12)
+                except Exception:  # noqa: BLE001
+                    log.exception("because-you-liked failed")
+                rows = mixes_mod.assemble_home_mix_rows(
+                    rediscover=red, fresh=fresh, daily=daily,
+                    quick=quick, because=because,
+                    max_rows=3, min_count=4)
+                if rows:
+                    mixes_mod.store_home_mixes(win.library, rows)
+            if radar_need:
+                try:
+                    radar = mixes_mod.release_radar(
+                        win.api, win.library, limit=30)
+                    if radar:
+                        mixes_mod.store_release_radar(win.library, radar)
+                except Exception:  # noqa: BLE001
+                    log.exception("release radar failed")
             return rows
 
         def done(rows) -> None:

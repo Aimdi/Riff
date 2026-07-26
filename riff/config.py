@@ -29,8 +29,10 @@ DEFAULTS = {
     "audio_quality": "high",  # "high" | "medium" | "low"
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
+    "smart_queue_injection": True,  # auto-extend queue like mobile Smart Queue
     "crossfade": 0,  # seconds of blend between songs, 0 = off
     "exploration": 0.3,  # radio/discovery: 0 = familiar, 1 = adventurous
+    "podcast_continuous": True,  # auto-advance episodes in podcast queue
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",
@@ -60,6 +62,9 @@ DEFAULTS = {
     # SoulSync plugin (self-hosted search → download).
     "soulsync_host": "",
     "soulsync_api_key": "",
+    # Seeker / slskd (Soulseek via self-hosted slskd).
+    "slskd_host": "",
+    "slskd_api_key": "",
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
     # "mobile" = Riff Mobile shell (rail + mini player + full player);

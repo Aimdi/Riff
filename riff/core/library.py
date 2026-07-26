@@ -128,6 +128,12 @@ CREATE TABLE IF NOT EXISTS podcast_progress (
     transcript_url TEXT NOT NULL DEFAULT '',
     transcript_type TEXT NOT NULL DEFAULT ''
 );
+CREATE TABLE IF NOT EXISTS podcast_queue (
+    episode_id TEXT PRIMARY KEY,
+    position INTEGER NOT NULL,
+    track_json TEXT NOT NULL,
+    added_at REAL NOT NULL
+);
 """
 
 
@@ -226,6 +232,13 @@ class Library:
             self._db.execute(
                 "ALTER TABLE podcast_progress ADD COLUMN "
                 "transcript_type TEXT NOT NULL DEFAULT ''")
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS podcast_queue ("
+            "episode_id TEXT PRIMARY KEY,"
+            "position INTEGER NOT NULL,"
+            "track_json TEXT NOT NULL,"
+            "added_at REAL NOT NULL)"
+        )
 
     # -- podcasts ----------------------------------------------------------
 
@@ -383,6 +396,45 @@ class Library:
             }
             for r in rows
         ]
+
+    def podcast_queue_add(self, track: Track) -> None:
+        if not track.video_id:
+            return
+        with self._lock, self._db:
+            row = self._db.execute(
+                "SELECT COALESCE(MAX(position), -1) FROM podcast_queue"
+            ).fetchone()
+            pos = int(row[0]) + 1 if row else 0
+            self._db.execute(
+                "INSERT OR REPLACE INTO podcast_queue "
+                "(episode_id, position, track_json, added_at) "
+                "VALUES (?,?,?,?)",
+                (track.video_id, pos, json.dumps(track.to_dict()),
+                 time.time()),
+            )
+
+    def podcast_queue_remove(self, episode_id: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_queue WHERE episode_id = ?",
+                (episode_id,))
+
+    def podcast_queue_clear(self) -> None:
+        with self._lock, self._db:
+            self._db.execute("DELETE FROM podcast_queue")
+
+    def podcast_queue_tracks(self) -> list[Track]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT track_json FROM podcast_queue ORDER BY position ASC"
+            ).fetchall()
+        out: list[Track] = []
+        for (payload,) in rows:
+            try:
+                out.append(Track.from_dict(json.loads(payload)))
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        return out
 
     # -- favorites ---------------------------------------------------------
 
