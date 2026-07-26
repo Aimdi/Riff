@@ -116,6 +116,16 @@ CREATE TABLE IF NOT EXISTS podcast_subs (
     artwork TEXT NOT NULL DEFAULT '',
     subscribed_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS podcast_progress (
+    episode_id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT '',
+    artist TEXT NOT NULL DEFAULT '',
+    artwork TEXT NOT NULL DEFAULT '',
+    stream_url TEXT NOT NULL DEFAULT '',
+    position_ms INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    updated_at REAL NOT NULL
+);
 """
 
 
@@ -188,6 +198,17 @@ class Library:
             "artwork TEXT NOT NULL DEFAULT '',"
             "subscribed_at REAL NOT NULL)"
         )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS podcast_progress ("
+            "episode_id TEXT PRIMARY KEY,"
+            "title TEXT NOT NULL DEFAULT '',"
+            "artist TEXT NOT NULL DEFAULT '',"
+            "artwork TEXT NOT NULL DEFAULT '',"
+            "stream_url TEXT NOT NULL DEFAULT '',"
+            "position_ms INTEGER NOT NULL DEFAULT 0,"
+            "duration_ms INTEGER NOT NULL DEFAULT 0,"
+            "updated_at REAL NOT NULL)"
+        )
 
     # -- podcasts ----------------------------------------------------------
 
@@ -231,6 +252,100 @@ class Library:
                 "author": r[2],
                 "artwork": r[3],
                 "subscribed_at": r[4],
+            }
+            for r in rows
+        ]
+
+    def save_podcast_progress(
+        self,
+        episode_id: str,
+        *,
+        title: str = "",
+        artist: str = "",
+        artwork: str = "",
+        stream_url: str = "",
+        position_ms: int = 0,
+        duration_ms: int = 0,
+    ) -> None:
+        """Upsert or clear an in-progress podcast episode (mobile rules)."""
+        from . import podcast_progress as pp
+
+        episode_id = (episode_id or "").strip()
+        if not episode_id.startswith("podcast_"):
+            return
+        try:
+            position_ms = int(position_ms)
+            duration_ms = int(duration_ms)
+        except (TypeError, ValueError):
+            return
+        if pp.is_finished(position_ms, duration_ms):
+            self.clear_podcast_progress(episode_id)
+            return
+        if not pp.should_persist(position_ms, duration_ms):
+            return
+        with self._lock, self._db:
+            self._db.execute(
+                "INSERT OR REPLACE INTO podcast_progress "
+                "(episode_id, title, artist, artwork, stream_url, "
+                "position_ms, duration_ms, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    episode_id,
+                    title or "",
+                    artist or "",
+                    artwork or "",
+                    stream_url or "",
+                    position_ms,
+                    duration_ms,
+                    time.time(),
+                ),
+            )
+
+    def clear_podcast_progress(self, episode_id: str) -> None:
+        with self._lock, self._db:
+            self._db.execute(
+                "DELETE FROM podcast_progress WHERE episode_id = ?",
+                (episode_id,),
+            )
+
+    def podcast_progress(self, episode_id: str) -> dict | None:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT episode_id, title, artist, artwork, stream_url, "
+                "position_ms, duration_ms, updated_at "
+                "FROM podcast_progress WHERE episode_id = ?",
+                (episode_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "episode_id": row[0],
+            "title": row[1],
+            "artist": row[2],
+            "artwork": row[3],
+            "stream_url": row[4],
+            "position_ms": row[5],
+            "duration_ms": row[6],
+            "updated_at": row[7],
+        }
+
+    def in_progress_podcasts(self) -> list[dict]:
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT episode_id, title, artist, artwork, stream_url, "
+                "position_ms, duration_ms, updated_at "
+                "FROM podcast_progress ORDER BY updated_at DESC"
+            ).fetchall()
+        return [
+            {
+                "episode_id": r[0],
+                "title": r[1],
+                "artist": r[2],
+                "artwork": r[3],
+                "stream_url": r[4],
+                "position_ms": r[5],
+                "duration_ms": r[6],
+                "updated_at": r[7],
             }
             for r in rows
         ]

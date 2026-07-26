@@ -6,6 +6,8 @@ import logging
 
 from gi.repository import Gtk, Pango
 
+from ..core import podcast_progress as pp
+from ..core.models import format_duration
 from ..core.podcast import (
     PodcastShow,
     ensure_feed_url,
@@ -77,6 +79,16 @@ class PodcastsPage(Gtk.Box):
 
         self._results_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         box.append(self._results_host)
+
+        continuing = self.window.library.in_progress_podcasts()
+        if continuing:
+            cont_head = Gtk.Label(label="Continue")
+            cont_head.add_css_class("title-3")
+            cont_head.set_xalign(0.0)
+            cont_head.set_margin_top(4)
+            box.append(cont_head)
+            for row in continuing[:12]:
+                box.append(self._continue_row(row))
 
         subs = self.window.library.podcast_subscriptions()
         head = Gtk.Label(label="Subscriptions" if subs else "Popular")
@@ -157,6 +169,52 @@ class PodcastsPage(Gtk.Box):
                 "network-error-symbolic", "Search failed", str(exc)))
 
         run_async(work, done, fail, name="riff-pod-search")
+
+    def _continue_row(self, row: dict) -> Gtk.Widget:
+        track = pp.track_from_progress(row)
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        box.set_margin_top(4)
+        box.set_margin_bottom(4)
+        art = CoverArt(56)
+        art.set_url(str(row.get("artwork") or ""))
+        box.append(art)
+        text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        text.set_hexpand(True)
+        t = Gtk.Label(label=str(row.get("title") or "Episode"))
+        t.add_css_class("heading")
+        t.set_xalign(0.0)
+        t.set_ellipsize(Pango.EllipsizeMode.END)
+        artist = str(row.get("artist") or "")
+        a = Gtk.Label(label=artist)
+        a.add_css_class("dim-label")
+        a.add_css_class("caption")
+        a.set_xalign(0.0)
+        a.set_ellipsize(Pango.EllipsizeMode.END)
+        text.append(t)
+        text.append(a)
+        frac = pp.progress_fraction(
+            int(row.get("position_ms") or 0),
+            int(row.get("duration_ms") or 0),
+        )
+        if frac is not None:
+            bar = Gtk.ProgressBar()
+            bar.set_fraction(frac)
+            bar.set_hexpand(True)
+            text.append(bar)
+        box.append(text)
+        play = Gtk.Button(label="Resume")
+        play.add_css_class("suggested-action")
+        play.add_css_class("pill")
+        play.set_sensitive(track is not None)
+
+        def _resume(*_a):
+            if track is None:
+                return
+            self.window.service.play_tracks([track], start=0, source="podcast")
+
+        play.connect("clicked", _resume)
+        box.append(play)
+        return box
 
     def _show_row(self, show: PodcastShow, *, subscribed: bool | None = None) -> Gtk.Widget:
         if subscribed is None:
@@ -292,15 +350,31 @@ class PodcastsPage(Gtk.Box):
                 t.set_xalign(0.0)
                 t.set_ellipsize(Pango.EllipsizeMode.END)
                 t.add_css_class("heading")
-                meta_l = Gtk.Label(label=ep.pub_date or "")
+                meta_bits = [ep.pub_date] if ep.pub_date else []
+                prog = self.window.library.podcast_progress(ep.episode_id)
+                if prog:
+                    frac = pp.progress_fraction(
+                        int(prog.get("position_ms") or 0),
+                        int(prog.get("duration_ms") or 0),
+                    )
+                    if frac is not None:
+                        meta_bits.append(f"{int(frac * 100)}% played")
+                meta_l = Gtk.Label(label=" · ".join(meta_bits))
                 meta_l.set_xalign(0.0)
                 meta_l.add_css_class("caption")
                 meta_l.add_css_class("dim-label")
                 text.append(t)
                 text.append(meta_l)
+                if prog:
+                    bar = Gtk.ProgressBar()
+                    bar.set_fraction(pp.progress_fraction(
+                        int(prog.get("position_ms") or 0),
+                        int(prog.get("duration_ms") or 0),
+                    ) or 0.0)
+                    bar.set_hexpand(True)
+                    text.append(bar)
                 box.append(text)
                 if ep.duration_sec:
-                    from ..core.models import format_duration
                     dur = Gtk.Label(label=format_duration(ep.duration_sec))
                     dur.add_css_class("caption")
                     dur.add_css_class("dim-label")

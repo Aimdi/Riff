@@ -63,6 +63,7 @@ class PlaybackService:
         self._playing_track = None
         self._last_completed: str | None = None
         self._scrobbled_current = False
+        self._last_podcast_save_ts = 0.0
         self.video_mode = False
         self._video: GstVideoPlayer | None = None
         self._using_gst_video = False
@@ -261,6 +262,7 @@ class PlaybackService:
         # Scrubber always follows mpv audio (video is visual-only).
         self._emit(self.position_listeners, pos)
         self._maybe_begin_crossfade(pos)
+        self._maybe_save_podcast_progress(pos)
 
     # -- crossfade ------------------------------------------------------------
 
@@ -551,6 +553,56 @@ class PlaybackService:
     def _after_start(self, track: Track) -> None:
         run_async(lambda: self.library.record_play(track), name="riff-history")
         self._prefetch_next()
+        self._maybe_resume_podcast(track)
+
+    def _maybe_resume_podcast(self, track: Track) -> None:
+        from . import podcast_progress as pp
+
+        if not pp.is_podcast_track(track):
+            return
+        row = self.library.podcast_progress(track.video_id)
+        if not row:
+            return
+        seek_to = pp.resume_seconds(
+            int(row.get("position_ms") or 0),
+            int(row.get("duration_ms") or 0),
+        )
+        if seek_to is None:
+            return
+        try:
+            self.engine.seek(seek_to)
+        except Exception:  # noqa: BLE001
+            log.debug("podcast resume seek failed", exc_info=True)
+
+    def _maybe_save_podcast_progress(self, pos: float) -> None:
+        """Throttle-save podcast position (~every 5s), matching mobile."""
+        import time
+
+        from . import podcast_progress as pp
+
+        track = self.queue.current
+        if not pp.is_podcast_track(track):
+            return
+        dur = float(self.engine.duration or track.duration or 0)
+        if dur <= 0:
+            return
+        pos_ms = int(max(0.0, pos) * 1000)
+        dur_ms = int(dur * 1000)
+        near_end = pp.is_finished(pos_ms, dur_ms)
+        now = time.monotonic()
+        if not near_end and now - self._last_podcast_save_ts < 5.0:
+            return
+        self._last_podcast_save_ts = now
+        artists = track.artists or []
+        self.library.save_podcast_progress(
+            track.video_id,
+            title=track.title or "",
+            artist=artists[0] if artists else "",
+            artwork=track.thumbnail or "",
+            stream_url=track.stream_url or "",
+            position_ms=pos_ms,
+            duration_ms=dur_ms,
+        )
 
     def _prefetch_next(self) -> None:
         nxt = self.queue.peek_next()
@@ -605,6 +657,9 @@ class PlaybackService:
     def _on_track_ended(self) -> None:
         self._log_play_transition(natural=True)
         self._maybe_scrobble()
+        ended = self.queue.current
+        if ended and (ended.video_id or "").startswith("podcast_"):
+            self.library.clear_podcast_progress(ended.video_id)
         nxt = self.queue.next(manual=False)
         if nxt is not None:
             self._start_current()
