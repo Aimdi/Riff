@@ -38,6 +38,10 @@ DEFAULTS = {
     # Lyrics provider preference (mobile LyricsSource).
     # "auto" | "better" | "lrclib" — KuGou is always a last-resort fallback.
     "lyrics_source": "auto",
+    # Vivi-inspired polish.
+    "match_album_art": True,  # dynamic accent from cover (Pitch Black stays black)
+    "normalize_volume": False,  # mpv loudnorm-ish leveling across tracks
+    "eq_preset": "flat",  # flat | bass | vocal | night
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",

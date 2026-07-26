@@ -17,7 +17,7 @@ _QUALITY_LABELS = ["High (best available)", "Medium (~160 kbps)", "Low (~96 kbps
 
 _LYRICS_SOURCES = ["auto", "better", "lrclib"]
 _LYRICS_LABELS = [
-    "Auto (LRCLIB → Better → KuGou)",
+    "Auto (Better → LRCLIB → KuGou)",
     "Better Lyrics first",
     "LRCLIB first",
 ]
@@ -184,6 +184,44 @@ class SettingsDialog(Adw.PreferencesDialog):
                 if 0 <= row.get_selected() < len(_LYRICS_SOURCES)
                 else "auto"))
         playback.add(lyrics)
+
+        match_art = Adw.SwitchRow()
+        match_art.set_title("Match album art")
+        match_art.set_subtitle(
+            "Tint accents from the current cover (Pitch Black stays black)")
+        match_art.set_active(
+            bool(config.settings.get("match_album_art", True)))
+        match_art.connect(
+            "notify::active",
+            lambda row, _p: self._on_match_art(bool(row.get_active())))
+        playback.add(match_art)
+
+        normalize = Adw.SwitchRow()
+        normalize.set_title("Normalize volume")
+        normalize.set_subtitle(
+            "Level loudness across tracks (mpv loudnorm)")
+        normalize.set_active(
+            bool(config.settings.get("normalize_volume", False)))
+        normalize.connect(
+            "notify::active",
+            lambda row, _p: self._on_normalize(bool(row.get_active())))
+        playback.add(normalize)
+
+        from ..core import audio_fx
+        eq_keys = list(audio_fx.EQ_LABELS.keys())
+        eq_labels = [audio_fx.EQ_LABELS[k] for k in eq_keys]
+        eq = Adw.ComboRow()
+        eq.set_title("Equalizer")
+        eq.set_subtitle("Simple presets inspired by Vivi Music Audio Control")
+        eq.set_model(Gtk.StringList.new(eq_labels))
+        cur_eq = str(config.settings.get("eq_preset", "flat") or "flat")
+        eq.set_selected(eq_keys.index(cur_eq) if cur_eq in eq_keys else 0)
+        eq.connect(
+            "notify::selected",
+            lambda row, _p: self._on_eq(
+                eq_keys[row.get_selected()]
+                if 0 <= row.get_selected() < len(eq_keys) else "flat"))
+        playback.add(eq)
 
         folder = Adw.EntryRow()
         folder.set_title("Local music folder")
@@ -868,6 +906,22 @@ class SettingsDialog(Adw.PreferencesDialog):
         value = _QUALITIES[row.get_selected()]
         config.settings.set("audio_quality", value)
         self.window.service.resolver.quality = value
+
+    def _on_match_art(self, enabled: bool) -> None:
+        config.settings.set("match_album_art", enabled)
+        from . import theme as theme_mod
+        if not enabled:
+            theme_mod.clear_dynamic_accent()
+        else:
+            self.window._on_track_accent(self.window.service.current_track)
+
+    def _on_normalize(self, enabled: bool) -> None:
+        config.settings.set("normalize_volume", enabled)
+        self.window.service.apply_audio_fx()
+
+    def _on_eq(self, preset: str) -> None:
+        config.settings.set("eq_preset", preset)
+        self.window.service.apply_audio_fx()
 
     def _on_radio(self, row: Adw.SwitchRow, _pspec) -> None:
         config.settings.set("autoplay_radio", bool(row.get_active()))

@@ -137,9 +137,14 @@ def test_fetch_lyrics_source_order(monkeypatch):
     monkeypatch.setattr(lyrics_mod, "fetch_kugou", kugou)
     track = Track(video_id="x", title="Song", artists=["Art"])
     synced, plain = lyrics_mod.fetch_lyrics(track, source="better")
-    assert calls == ["better", "lrclib"]
+    # Continues past line-synced hits looking for word-capable TTML.
+    assert calls[:2] == ["better", "lrclib"]
     assert synced[0][1] == "hi"
     assert plain == "hi"
+    # Auto prefers Better first (syllable-capable).
+    calls.clear()
+    lyrics_mod.fetch_lyrics(track, source="auto")
+    assert calls[0] == "better"
 
 
 def test_kugou_decode_helper():

@@ -87,6 +87,7 @@ class PlaybackService:
         self._attach_engine(engine)
 
         self.engine.set_volume(int(config.settings.get("volume", 100)))
+        self.apply_audio_fx()
 
     # -- public control ------------------------------------------------------
 
@@ -101,6 +102,27 @@ class PlaybackService:
         engine.on_duration = lambda d: self._emit(self.duration_listeners, d)
         engine.on_track_ended = self._on_track_ended
         engine.on_error = self._on_engine_error
+        self.apply_audio_fx(engine)
+
+    def apply_audio_fx(self, engine=None) -> None:
+        """Apply EQ / loudnorm from settings to the active (or given) deck."""
+        from . import audio_fx
+
+        eng = engine or self.engine
+        af = audio_fx.build_af(
+            eq_preset=str(config.settings.get("eq_preset", "flat") or "flat"),
+            normalize=bool(config.settings.get("normalize_volume", False)),
+        )
+        try:
+            eng.set_audio_filter(af)
+        except Exception:  # noqa: BLE001
+            log.debug("audio fx apply failed", exc_info=True)
+        spare = self._spare_engine
+        if spare is not None and spare is not eng:
+            try:
+                spare.set_audio_filter(af)
+            except Exception:  # noqa: BLE001
+                pass
 
     @property
     def current_track(self) -> Track | None:

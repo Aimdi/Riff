@@ -156,3 +156,69 @@ def load_collage(urls: list[str], size: int, callback) -> None:
         load_texture(quad[0], size, callback)
 
     run_async(work, done, error, name="riff-collage")
+
+
+def load_blurred_texture(url: str, callback) -> None:
+    """Soft art wash for immersive full-player backdrop (Vivi/Monochrome vibe)."""
+    if not url:
+        callback(None)
+        return
+    from ..core.models import upscale_thumbnail
+    from . import palette
+
+    original = url
+    url = upscale_thumbnail(url, 320)
+
+    def work():
+        path = _cache_path(url)
+        if not os.path.exists(path):
+            os.makedirs(config.ART_CACHE_DIR, exist_ok=True)
+            try:
+                data = _fetch(url)
+            except Exception:  # noqa: BLE001
+                data = _fetch(original)
+            tmp = path + ".part"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        return palette.blur_pixbuf_path(path, size=40)
+
+    def done(texture) -> None:
+        callback(texture)
+
+    def error(_exc: Exception) -> None:
+        # Fall back to sharp texture rather than empty.
+        load_texture(original, 640, callback)
+
+    run_async(work, done, error, name="riff-art-blur")
+
+
+def load_dominant_accent(url: str, callback) -> None:
+    """callback((accent_bg, accent_fg, accent) | None) on the main loop."""
+    if not url:
+        callback(None)
+        return
+    from ..core.models import upscale_thumbnail
+    from . import palette
+
+    original = url
+    url = upscale_thumbnail(url, 96)
+
+    def work():
+        path = _cache_path(url)
+        if not os.path.exists(path):
+            os.makedirs(config.ART_CACHE_DIR, exist_ok=True)
+            try:
+                data = _fetch(url)
+            except Exception:  # noqa: BLE001
+                data = _fetch(original)
+            tmp = path + ".part"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+        rgb = palette.dominant_from_file(path)
+        if rgb is None:
+            return None
+        return palette.accent_pair(*rgb)
+
+    run_async(work, callback, lambda _e: callback(None), name="riff-art-accent")

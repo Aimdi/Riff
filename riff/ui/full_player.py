@@ -181,6 +181,7 @@ class FullPlayer(Gtk.Overlay):
         self._sleep_btn.set_menu_model(self._build_sleep_menu())
         switch.append(self._sleep_btn)
         body.append(switch)
+        self._sleep_tick_id = None
 
         self._similar_host = Gtk.Box(
             orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -203,6 +204,7 @@ class FullPlayer(Gtk.Overlay):
         self._lyrics_tab.connect("toggled", self._on_lyrics_tab)
 
         self._on_track(svc.current_track)
+        self._start_sleep_ticker()
 
     def show_tab(self, name: str) -> None:
         self._tab_sync = True
@@ -232,7 +234,34 @@ class FullPlayer(Gtk.Overlay):
         def apply(texture) -> None:
             self._backdrop.set_paintable(texture)
 
-        images.load_texture(url, 640, apply)
+        # Soft wash (Vivi / Monochrome ambient canvas lite).
+        images.load_blurred_texture(url, apply)
+
+    def _start_sleep_ticker(self) -> None:
+        from gi.repository import GLib
+
+        if self._sleep_tick_id is not None:
+            return
+
+        def tick() -> bool:
+            self._refresh_sleep_label()
+            return True
+
+        self._sleep_tick_id = GLib.timeout_add_seconds(1, tick)
+        self._refresh_sleep_label()
+
+    def _refresh_sleep_label(self) -> None:
+        st = self.service.sleep_timer.state
+        if not st.active:
+            self._sleep_btn.set_label("Sleep")
+            return
+        left = self.service.sleep_timer.remaining_seconds()
+        if left is None:
+            self._sleep_btn.set_label("Sleep · EOS")
+            return
+        mins = int(left) // 60
+        secs = int(left) % 60
+        self._sleep_btn.set_label(f"Sleep · {mins}:{secs:02d}")
 
     def _on_track(self, track) -> None:
         self._current = track

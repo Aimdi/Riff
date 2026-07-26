@@ -42,14 +42,29 @@ CSS = b"""
     background-color: #0b0b14;
 }
 .riff-full-player-backdrop {
-    opacity: 0.55;
+    opacity: 0.72;
 }
 .riff-full-player-scrim {
     background: linear-gradient(
         180deg,
-        alpha(#0b0b14, 0.55) 0%,
-        alpha(#0b0b14, 0.82) 45%,
-        alpha(#0b0b14, 0.94) 100%);
+        alpha(#000000, 0.35) 0%,
+        alpha(#000000, 0.62) 42%,
+        alpha(#000000, 0.88) 100%);
+}
+.riff-lyric-word {
+    opacity: 0.42;
+}
+.riff-lyric-word-done {
+    opacity: 0.78;
+}
+.riff-lyric-word-active {
+    opacity: 1.0;
+    color: @accent_color;
+    font-weight: 700;
+}
+.riff-lyrics-source {
+    font-size: 0.85em;
+    opacity: 0.65;
 }
 .riff-full-player-art {
     border-radius: 14px;
@@ -613,6 +628,7 @@ class MainWindow(Adw.ApplicationWindow):
         self.service.video_listeners.append(self._on_video_mode)
         self.service.video_paintable_listeners.append(
             self.player_bar.set_video_paintable)
+        self.service.track_listeners.append(self._on_track_accent)
         self._install_actions()
         self.connect("close-request", self._on_close)
 
@@ -1825,6 +1841,30 @@ class MainWindow(Adw.ApplicationWindow):
 
             dlg.connect("closed", _clear)
         dlg.present(self)
+
+    def _on_track_accent(self, track) -> None:
+        """Vivi-style dynamic accent from album art (optional)."""
+        from . import theme as theme_mod
+
+        if not bool(config.settings.get("match_album_art", True)):
+            theme_mod.clear_dynamic_accent()
+            return
+        if track is None or not (track.thumbnail or "").strip():
+            theme_mod.clear_dynamic_accent()
+            return
+        url = track.thumbnail
+        seq = getattr(self, "_accent_seq", 0) + 1
+        self._accent_seq = seq
+
+        def done(pair) -> None:
+            if seq != getattr(self, "_accent_seq", 0):
+                return
+            if not pair:
+                return
+            theme_mod.apply_dynamic_accent(*pair)
+
+        from . import images as images_mod
+        images_mod.load_dominant_accent(url, done)
 
     def _ai_provider_config(self, interactive: bool) -> dict | None:
         from ..core import local_ai

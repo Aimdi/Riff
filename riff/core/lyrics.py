@@ -342,12 +342,12 @@ def fetch_kugou(
     return None
 
 
-def fetch_lyrics(
+def fetch_lyrics_result(
     track: Track,
     *,
     source: str = "auto",
-) -> tuple[list[tuple[float, str]], str]:
-    """Returns (synced_lines, plain_text); either may be empty.
+) -> LyricsResult | None:
+    """Full lyrics hit including TTML when Better Lyrics wins.
 
     ``source``: ``auto`` | ``better`` | ``lrclib`` (KuGou always last fallback).
     Blocking — call from a worker thread.
@@ -359,14 +359,16 @@ def fetch_lyrics(
     src = (source or "auto").strip().lower()
     if src in ("betterlyrics", "better_lyrics"):
         src = "better"
-    providers = []
     if src == "better":
         providers = ["better", "lrclib", "kugou"]
     elif src == "lrclib":
         providers = ["lrclib", "kugou"]
     else:
-        providers = ["lrclib", "better", "kugou"]
+        # Prefer syllable-capable Better ahead of LRCLIB when auto (Vivi-style).
+        providers = ["better", "lrclib", "kugou"]
 
+    best: LyricsResult | None = None
+    best_score = -1
     for name in providers:
         try:
             if name == "better":
@@ -380,9 +382,34 @@ def fetch_lyrics(
         except Exception:  # noqa: BLE001
             log.debug("%s lyrics failed for %s", name, title, exc_info=True)
             hit = None
-        if hit and (hit.synced or hit.plain):
-            return hit.synced, hit.plain
-    return [], ""
+        if not hit or not (hit.synced or hit.plain):
+            continue
+        score = 1
+        if hit.synced:
+            score = 2
+        if hit.ttml and any(l.has_words for l in parse_ttml(hit.ttml)):
+            score = 3
+        if score > best_score:
+            best = hit
+            best_score = score
+        if best_score >= 3:
+            break
+    return best
+
+
+def fetch_lyrics(
+    track: Track,
+    *,
+    source: str = "auto",
+) -> tuple[list[tuple[float, str]], str]:
+    """Returns (synced_lines, plain_text); either may be empty.
+
+    Blocking — call from a worker thread.
+    """
+    hit = fetch_lyrics_result(track, source=source)
+    if not hit:
+        return [], ""
+    return hit.synced, hit.plain
 
 
 def line_index_at(lines: list[tuple[float, str]], position: float) -> int:
