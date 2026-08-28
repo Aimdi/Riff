@@ -15,6 +15,13 @@ from . import theme
 _QUALITIES = ["high", "medium", "low"]
 _QUALITY_LABELS = ["High (best available)", "Medium (~160 kbps)", "Low (~96 kbps)"]
 
+_LYRICS_SOURCES = ["auto", "better", "lrclib"]
+_LYRICS_LABELS = [
+    "Auto (Better → LRCLIB → KuGou)",
+    "Better Lyrics first",
+    "LRCLIB first",
+]
+
 # Provider combo indices — keep in sync with _on_provider / _provider_index.
 _PROVIDERS = ("local", "anthropic", "openai")
 _PROVIDER_LABELS = (
@@ -51,6 +58,23 @@ class SettingsDialog(Adw.PreferencesDialog):
             if current_theme in self._theme_keys else 0)
         theme_row.connect("notify::selected", self._on_theme)
         appearance.add(theme_row)
+
+        shell = Adw.ComboRow()
+        shell.set_title("Shell layout")
+        shell.set_subtitle(
+            "Mobile matches Riff Mobile (rail, mini player, full Now Playing). "
+            "Restart may be needed after switching.")
+        shell.set_model(Gtk.StringList.new(["Mobile (Riff Mobile)", "Desktop"]))
+        shell_keys = ("mobile", "desktop")
+        current_shell = str(config.settings.get("shell_layout", "mobile"))
+        shell.set_selected(
+            shell_keys.index(current_shell)
+            if current_shell in shell_keys else 0)
+        shell.connect(
+            "notify::selected",
+            lambda row, _p: config.settings.set(
+                "shell_layout", shell_keys[row.get_selected()]))
+        appearance.add(shell)
         page.add(appearance)
 
         # -- playback --------------------------------------------------------
@@ -105,6 +129,185 @@ class SettingsDialog(Adw.PreferencesDialog):
         radio.connect("notify::active", self._on_radio)
         playback.add(radio)
 
+        smart_q = Adw.SwitchRow()
+        smart_q.set_title("Smart queue")
+        smart_q.set_subtitle(
+            "Automatically add similar songs when few tracks remain "
+            "(Riff Mobile Smart Queue)")
+        smart_q.set_active(
+            bool(config.settings.get("smart_queue_injection", True)))
+        smart_q.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "smart_queue_injection", bool(row.get_active())))
+        playback.add(smart_q)
+
+        pod_cont = Adw.SwitchRow()
+        pod_cont.set_title("Continuous podcasts")
+        pod_cont.set_subtitle(
+            "Advance through the podcast episode queue automatically")
+        pod_cont.set_active(
+            bool(config.settings.get("podcast_continuous", True)))
+        pod_cont.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "podcast_continuous", bool(row.get_active())))
+        playback.add(pod_cont)
+
+        pod_ads = Adw.SwitchRow()
+        pod_ads.set_title("Skip podcast ads")
+        pod_ads.set_subtitle(
+            "Automatically skip sponsor/ad chapters when Podcasting 2.0 "
+            "markers are present")
+        pod_ads.set_active(
+            bool(config.settings.get("podcast_auto_skip_ads", True)))
+        pod_ads.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "podcast_auto_skip_ads", bool(row.get_active())))
+        playback.add(pod_ads)
+
+        lyrics = Adw.ComboRow()
+        lyrics.set_title("Lyrics source")
+        lyrics.set_subtitle(
+            "Preferred synced-lyrics provider (KuGou is always a fallback)")
+        lyrics.set_model(Gtk.StringList.new(_LYRICS_LABELS))
+        cur_lyrics = str(config.settings.get("lyrics_source", "auto") or "auto")
+        lyrics.set_selected(
+            _LYRICS_SOURCES.index(cur_lyrics)
+            if cur_lyrics in _LYRICS_SOURCES else 0)
+        lyrics.connect(
+            "notify::selected",
+            lambda row, _p: config.settings.set(
+                "lyrics_source",
+                _LYRICS_SOURCES[row.get_selected()]
+                if 0 <= row.get_selected() < len(_LYRICS_SOURCES)
+                else "auto"))
+        playback.add(lyrics)
+
+        match_art = Adw.SwitchRow()
+        match_art.set_title("Match album art")
+        match_art.set_subtitle(
+            "Tint accents from the current cover (Pitch Black stays black)")
+        match_art.set_active(
+            bool(config.settings.get("match_album_art", True)))
+        match_art.connect(
+            "notify::active",
+            lambda row, _p: self._on_match_art(bool(row.get_active())))
+        playback.add(match_art)
+
+        normalize = Adw.SwitchRow()
+        normalize.set_title("Normalize volume")
+        normalize.set_subtitle(
+            "Level loudness across tracks (mpv loudnorm)")
+        normalize.set_active(
+            bool(config.settings.get("normalize_volume", False)))
+        normalize.connect(
+            "notify::active",
+            lambda row, _p: self._on_normalize(bool(row.get_active())))
+        playback.add(normalize)
+
+        from ..core import audio_fx
+        eq_keys = list(audio_fx.EQ_LABELS.keys())
+        eq_labels = [audio_fx.EQ_LABELS[k] for k in eq_keys]
+        eq = Adw.ComboRow()
+        eq.set_title("Equalizer")
+        eq.set_subtitle("Simple presets inspired by Vivi Music Audio Control")
+        eq.set_model(Gtk.StringList.new(eq_labels))
+        cur_eq = str(config.settings.get("eq_preset", "flat") or "flat")
+        eq.set_selected(eq_keys.index(cur_eq) if cur_eq in eq_keys else 0)
+        eq.connect(
+            "notify::selected",
+            lambda row, _p: self._on_eq(
+                eq_keys[row.get_selected()]
+                if 0 <= row.get_selected() < len(eq_keys) else "flat"))
+        playback.add(eq)
+
+        skip_sil = Adw.SwitchRow()
+        skip_sil.set_title("Skip silence")
+        skip_sil.set_subtitle(
+            "Trim leading/trailing quiet gaps (mpv silenceremove)")
+        skip_sil.set_active(bool(config.settings.get("skip_silence", False)))
+        skip_sil.connect(
+            "notify::active",
+            lambda row, _p: self._on_skip_silence(bool(row.get_active())))
+        playback.add(skip_sil)
+
+        speed_keys = ["0.75", "1.0", "1.25", "1.5", "1.75", "2.0"]
+        speed_labels = [f"{s}×" for s in speed_keys]
+        speed = Adw.ComboRow()
+        speed.set_title("Playback speed")
+        speed.set_subtitle("Tempo for music and podcasts (pitch kept)")
+        speed.set_model(Gtk.StringList.new(speed_labels))
+        try:
+            cur_spd = float(config.settings.get("playback_speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            cur_spd = 1.0
+        cur_key = min(speed_keys, key=lambda s: abs(float(s) - cur_spd))
+        speed.set_selected(speed_keys.index(cur_key))
+        speed.connect(
+            "notify::selected",
+            lambda row, _p: self._on_speed(
+                float(speed_keys[row.get_selected()])
+                if 0 <= row.get_selected() < len(speed_keys) else 1.0))
+        playback.add(speed)
+
+        keep_pitch = Adw.SwitchRow()
+        keep_pitch.set_title("Keep pitch")
+        keep_pitch.set_subtitle(
+            "Correct pitch when changing playback speed")
+        keep_pitch.set_active(bool(config.settings.get("keep_pitch", True)))
+        keep_pitch.connect(
+            "notify::active",
+            lambda row, _p: self._on_keep_pitch(bool(row.get_active())))
+        playback.add(keep_pitch)
+
+        sb = Adw.SwitchRow()
+        sb.set_title("SponsorBlock")
+        sb.set_subtitle(
+            "Skip non-music / intro / outro / sponsor segments on YouTube")
+        sb.set_active(bool(config.settings.get("sponsorblock", False)))
+        sb.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "sponsorblock", bool(row.get_active())))
+        playback.add(sb)
+
+        sb_toast = Adw.SwitchRow()
+        sb_toast.set_title("SponsorBlock toast")
+        sb_toast.set_subtitle("Show a brief notice when a segment is skipped")
+        sb_toast.set_active(
+            bool(config.settings.get("sponsorblock_toast", True)))
+        sb_toast.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "sponsorblock_toast", bool(row.get_active())))
+        playback.add(sb_toast)
+
+        auto_err = Adw.SwitchRow()
+        auto_err.set_title("Auto-skip on error")
+        auto_err.set_subtitle(
+            "Retry a failed stream once, then skip to the next track")
+        auto_err.set_active(
+            bool(config.settings.get("auto_skip_on_error", True)))
+        auto_err.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "auto_skip_on_error", bool(row.get_active())))
+        playback.add(auto_err)
+
+        no_dupes = Adw.SwitchRow()
+        no_dupes.set_title("Prevent queue duplicates")
+        no_dupes.set_subtitle(
+            "Ignore Add Next / Add to Queue when the song is already queued")
+        no_dupes.set_active(
+            bool(config.settings.get("prevent_queue_duplicates", True)))
+        no_dupes.connect(
+            "notify::active",
+            lambda row, _p: config.settings.set(
+                "prevent_queue_duplicates", bool(row.get_active())))
+        playback.add(no_dupes)
+
         folder = Adw.EntryRow()
         folder.set_title("Local music folder")
         folder.set_text(str(config.settings.get("local_music_dir", "~/Music")))
@@ -113,6 +316,209 @@ class SettingsDialog(Adw.PreferencesDialog):
             "local_music_dir", row.get_text()))
         playback.add(folder)
         page.add(playback)
+
+        # -- Never play / banned ----------------------------------------------
+        banned = Adw.PreferencesGroup()
+        banned.set_title("Never play")
+        banned.set_description(
+            "Tracks you've marked “never play this” are excluded from "
+            "radio and discovery.")
+        dislikes = self.window.library.dislikes()
+        if not dislikes:
+            empty = Adw.ActionRow()
+            empty.set_title("No banned songs")
+            empty.set_subtitle("Long-press a track in the player to ban it")
+            banned.add(empty)
+        else:
+            for track in dislikes[:40]:
+                row = Adw.ActionRow()
+                row.set_title(track.title or track.video_id)
+                row.set_subtitle(track.artist or "")
+                rm = Gtk.Button(label="Remove")
+                rm.add_css_class("flat")
+                rm.set_valign(Gtk.Align.CENTER)
+
+                def _unban(_b, vid=track.video_id, r=row) -> None:
+                    self.window.library.remove_dislike(vid)
+                    banned.remove(r)
+                    self.window.toast("Removed from never-play list")
+
+                rm.connect("clicked", _unban)
+                row.add_suffix(rm)
+                banned.add(row)
+        page.add(banned)
+
+        # -- Audiobookshelf (Lissen-compatible) --------------------------------
+        abs_group = Adw.PreferencesGroup()
+        abs_group.set_title("Audiobookshelf")
+        abs_group.set_description(
+            "Stream your self-hosted library (same API as Riff Mobile / "
+            "Lissen). LibriVox discover still works without a server.")
+        self._abs_host = Adw.EntryRow()
+        self._abs_host.set_title("Server URL")
+        self._abs_host.set_text(
+            str(config.settings.get("abs_host", "") or ""))
+        self._abs_host.set_show_apply_button(True)
+        self._abs_host.connect("apply", lambda row: self._save(
+            "abs_host", row.get_text().strip()))
+        abs_group.add(self._abs_host)
+        self._abs_user = Adw.EntryRow()
+        self._abs_user.set_title("Username")
+        self._abs_user.set_text(
+            str(config.settings.get("abs_username", "") or ""))
+        self._abs_user.set_show_apply_button(True)
+        self._abs_user.connect("apply", lambda row: self._save(
+            "abs_username", row.get_text().strip()))
+        abs_group.add(self._abs_user)
+        self._abs_pass = Adw.PasswordEntryRow()
+        self._abs_pass.set_title("Password")
+        self._abs_pass.set_text(
+            str(config.settings.get("abs_password", "") or ""))
+        self._abs_pass.set_show_apply_button(True)
+        self._abs_pass.connect("apply", lambda row: self._save(
+            "abs_password", row.get_text()))
+        abs_group.add(self._abs_pass)
+        connected = bool(config.settings.get("abs_token", ""))
+        self._abs_status = Adw.ActionRow()
+        self._abs_status.set_title(
+            "Connected" if connected else "Not connected")
+        self._abs_status.set_subtitle(
+            str(config.settings.get("abs_host", "") or "")
+            if connected else "Save credentials, then Connect")
+        connect_btn = Gtk.Button(
+            label="Disconnect" if connected else "Connect")
+        connect_btn.set_valign(Gtk.Align.CENTER)
+        if not connected:
+            connect_btn.add_css_class("suggested-action")
+        connect_btn.connect("clicked", self._on_abs_toggle)
+        self._abs_status.add_suffix(connect_btn)
+        self._abs_connect_btn = connect_btn
+        abs_group.add(self._abs_status)
+        page.add(abs_group)
+
+        # -- Cloud (Subsonic-compatible) --------------------------------------
+        cloud_group = Adw.PreferencesGroup()
+        cloud_group.set_title("Cloud music")
+        cloud_group.set_description(
+            "Stream your own collection from Navidrome, OpenSubsonic, "
+            "Airsonic, Gonic, Ampache, or any Subsonic-compatible server.")
+        self._cloud_host = Adw.EntryRow()
+        self._cloud_host.set_title("Server URL")
+        self._cloud_host.set_text(
+            str(config.settings.get("cloud_host", "") or ""))
+        self._cloud_host.set_show_apply_button(True)
+        self._cloud_host.connect("apply", lambda row: self._save(
+            "cloud_host", row.get_text().strip()))
+        cloud_group.add(self._cloud_host)
+        self._cloud_user = Adw.EntryRow()
+        self._cloud_user.set_title("Username")
+        self._cloud_user.set_text(
+            str(config.settings.get("cloud_username", "") or ""))
+        self._cloud_user.set_show_apply_button(True)
+        self._cloud_user.connect("apply", lambda row: self._save(
+            "cloud_username", row.get_text().strip()))
+        cloud_group.add(self._cloud_user)
+        self._cloud_pass = Adw.PasswordEntryRow()
+        self._cloud_pass.set_title("Password")
+        self._cloud_pass.set_text(
+            str(config.settings.get("cloud_password", "") or ""))
+        self._cloud_pass.set_show_apply_button(True)
+        self._cloud_pass.connect("apply", lambda row: self._save(
+            "cloud_password", row.get_text()))
+        cloud_group.add(self._cloud_pass)
+        cloud_ok = bool(
+            config.settings.get("cloud_host")
+            and config.settings.get("cloud_username")
+            and config.settings.get("cloud_password"))
+        self._cloud_status = Adw.ActionRow()
+        self._cloud_status.set_title(
+            "Connected" if cloud_ok else "Not connected")
+        self._cloud_status.set_subtitle(
+            str(config.settings.get("cloud_host", "") or "")
+            if cloud_ok else "Save credentials, then Connect")
+        cloud_btn = Gtk.Button(
+            label="Disconnect" if cloud_ok else "Connect")
+        cloud_btn.set_valign(Gtk.Align.CENTER)
+        if not cloud_ok:
+            cloud_btn.add_css_class("suggested-action")
+        cloud_btn.connect("clicked", self._on_cloud_toggle)
+        self._cloud_status.add_suffix(cloud_btn)
+        self._cloud_connect_btn = cloud_btn
+        cloud_group.add(self._cloud_status)
+        page.add(cloud_group)
+
+        # -- SoulSync plugin --------------------------------------------------
+        ss_group = Adw.PreferencesGroup()
+        ss_group.set_title("SoulSync")
+        ss_group.set_description(
+            "Optional plugin: search and queue downloads on a self-hosted "
+            "SoulSync server (Bearer API key).")
+        self._ss_host = Adw.EntryRow()
+        self._ss_host.set_title("Server URL")
+        self._ss_host.set_text(
+            str(config.settings.get("soulsync_host", "") or ""))
+        self._ss_host.set_show_apply_button(True)
+        self._ss_host.connect("apply", lambda row: self._save(
+            "soulsync_host", row.get_text().strip()))
+        ss_group.add(self._ss_host)
+        self._ss_key = Adw.PasswordEntryRow()
+        self._ss_key.set_title("API key")
+        self._ss_key.set_text(
+            str(config.settings.get("soulsync_api_key", "") or ""))
+        self._ss_key.set_show_apply_button(True)
+        self._ss_key.connect("apply", lambda row: self._save(
+            "soulsync_api_key", row.get_text()))
+        ss_group.add(self._ss_key)
+        ss_ok = bool(
+            config.settings.get("soulsync_host")
+            and config.settings.get("soulsync_api_key"))
+        self._ss_status = Adw.ActionRow()
+        self._ss_status.set_title(
+            "Connected" if ss_ok else "Not connected")
+        self._ss_status.set_subtitle(
+            str(config.settings.get("soulsync_host", "") or "")
+            if ss_ok else "Save URL + key, then Connect")
+        ss_btn = Gtk.Button(label="Disconnect" if ss_ok else "Connect")
+        ss_btn.set_valign(Gtk.Align.CENTER)
+        if not ss_ok:
+            ss_btn.add_css_class("suggested-action")
+        ss_btn.connect("clicked", self._on_soulsync_toggle)
+        self._ss_status.add_suffix(ss_btn)
+        self._ss_connect_btn = ss_btn
+        ss_group.add(self._ss_status)
+        page.add(ss_group)
+
+        # -- Seeker / slskd ---------------------------------------------------
+        sk_group = Adw.PreferencesGroup()
+        sk_group.set_title("Seeker (slskd)")
+        sk_group.set_description(
+            "Search Soulseek through a self-hosted slskd instance "
+            "(API key optional depending on your server).")
+        self._sk_host = Adw.EntryRow()
+        self._sk_host.set_title("Server URL")
+        self._sk_host.set_text(
+            str(config.settings.get("slskd_host", "") or ""))
+        self._sk_host.set_show_apply_button(True)
+        self._sk_host.connect("apply", lambda row: self._save(
+            "slskd_host", row.get_text().strip()))
+        sk_group.add(self._sk_host)
+        self._sk_key = Adw.PasswordEntryRow()
+        self._sk_key.set_title("API key (optional)")
+        self._sk_key.set_text(
+            str(config.settings.get("slskd_api_key", "") or ""))
+        self._sk_key.set_show_apply_button(True)
+        self._sk_key.connect("apply", lambda row: self._save(
+            "slskd_api_key", row.get_text()))
+        sk_group.add(self._sk_key)
+        sk_btn = Gtk.Button(label="Connect")
+        sk_btn.add_css_class("suggested-action")
+        sk_btn.set_valign(Gtk.Align.CENTER)
+        sk_row = Adw.ActionRow()
+        sk_row.set_title("Test connection")
+        sk_row.add_suffix(sk_btn)
+        sk_btn.connect("clicked", self._on_slskd_connect)
+        sk_group.add(sk_row)
+        page.add(sk_group)
 
         # -- scrobbling ---------------------------------------------------------
         scrobble = Adw.PreferencesGroup()
@@ -394,6 +800,179 @@ class SettingsDialog(Adw.PreferencesDialog):
         config.settings.set(key, value.strip())
         self.window.toast("Saved")
 
+    def _on_abs_toggle(self, _btn) -> None:
+        if config.settings.get("abs_token", ""):
+            for key in ("abs_token", "abs_user_id", "abs_library_id"):
+                config.settings.set(key, "")
+            self._abs_status.set_title("Not connected")
+            self._abs_status.set_subtitle("Save credentials, then Connect")
+            self._abs_connect_btn.set_label("Connect")
+            self._abs_connect_btn.add_css_class("suggested-action")
+            self.window.toast("Audiobookshelf disconnected")
+            return
+
+        from ..core import audiobookshelf as abs_mod
+
+        host = self._abs_host.get_text().strip()
+        user = self._abs_user.get_text().strip()
+        password = self._abs_pass.get_text()
+        config.settings.set("abs_host", host)
+        config.settings.set("abs_username", user)
+        config.settings.set("abs_password", password)
+        self._abs_status.set_subtitle("Connecting…")
+        self._abs_connect_btn.set_sensitive(False)
+
+        def work():
+            session = abs_mod.login(host, user, password)
+            libs = abs_mod.fetch_libraries(session)
+            lib = abs_mod.prefer_book_library(libs)
+            if lib:
+                session.library_id = lib.id
+            return session
+
+        def done(session) -> None:
+            config.settings.set("abs_host", session.host)
+            config.settings.set("abs_username", session.username)
+            config.settings.set("abs_token", session.token)
+            config.settings.set("abs_user_id", session.user_id)
+            config.settings.set("abs_library_id", session.library_id)
+            self._abs_status.set_title("Connected")
+            self._abs_status.set_subtitle(session.host)
+            self._abs_connect_btn.set_label("Disconnect")
+            self._abs_connect_btn.set_sensitive(True)
+            self._abs_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("Audiobookshelf connected")
+
+        def fail(exc: Exception) -> None:
+            self._abs_status.set_title("Not connected")
+            self._abs_status.set_subtitle(str(exc))
+            self._abs_connect_btn.set_sensitive(True)
+            self.window.toast(f"Audiobookshelf: {exc}")
+
+        run_async(work, done, fail, name="riff-abs-login")
+
+    def _on_cloud_toggle(self, _btn) -> None:
+        if (config.settings.get("cloud_host")
+                and config.settings.get("cloud_username")
+                and config.settings.get("cloud_password")
+                and self._cloud_connect_btn.get_label() == "Disconnect"):
+            for key in (
+                "cloud_host", "cloud_username", "cloud_password",
+            ):
+                config.settings.set(key, "")
+            config.settings.set("cloud_legacy_auth", False)
+            self._cloud_host.set_text("")
+            self._cloud_user.set_text("")
+            self._cloud_pass.set_text("")
+            self._cloud_status.set_title("Not connected")
+            self._cloud_status.set_subtitle("Save credentials, then Connect")
+            self._cloud_connect_btn.set_label("Connect")
+            self._cloud_connect_btn.add_css_class("suggested-action")
+            self.window.toast("Cloud disconnected")
+            return
+
+        from ..core import cloud as cloud_mod
+
+        host = self._cloud_host.get_text().strip()
+        user = self._cloud_user.get_text().strip()
+        password = self._cloud_pass.get_text()
+        config.settings.set("cloud_host", host)
+        config.settings.set("cloud_username", user)
+        config.settings.set("cloud_password", password)
+        self._cloud_status.set_subtitle("Connecting…")
+        self._cloud_connect_btn.set_sensitive(False)
+
+        def work():
+            return cloud_mod.login(host, user, password)
+
+        def done(session) -> None:
+            config.settings.set("cloud_host", session.host)
+            config.settings.set("cloud_username", session.username)
+            config.settings.set("cloud_password", session.password)
+            config.settings.set("cloud_legacy_auth", session.legacy_auth)
+            self._cloud_status.set_title("Connected")
+            self._cloud_status.set_subtitle(session.host)
+            self._cloud_connect_btn.set_label("Disconnect")
+            self._cloud_connect_btn.set_sensitive(True)
+            self._cloud_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("Cloud music connected")
+
+        def fail(exc: Exception) -> None:
+            config.settings.set("cloud_password", "")
+            self._cloud_status.set_title("Not connected")
+            self._cloud_status.set_subtitle(str(exc))
+            self._cloud_connect_btn.set_sensitive(True)
+            self.window.toast(f"Cloud: {exc}")
+
+        run_async(work, done, fail, name="riff-cloud-login")
+
+    def _on_soulsync_toggle(self, _btn) -> None:
+        if (config.settings.get("soulsync_host")
+                and config.settings.get("soulsync_api_key")
+                and self._ss_connect_btn.get_label() == "Disconnect"):
+            config.settings.set("soulsync_host", "")
+            config.settings.set("soulsync_api_key", "")
+            self._ss_host.set_text("")
+            self._ss_key.set_text("")
+            self._ss_status.set_title("Not connected")
+            self._ss_status.set_subtitle("Save URL + key, then Connect")
+            self._ss_connect_btn.set_label("Connect")
+            self._ss_connect_btn.add_css_class("suggested-action")
+            self.window.toast("SoulSync disconnected")
+            return
+
+        from ..core import soulsync as ss_mod
+
+        host = self._ss_host.get_text().strip()
+        key = self._ss_key.get_text().strip()
+        config.settings.set("soulsync_host", host)
+        config.settings.set("soulsync_api_key", key)
+        self._ss_status.set_subtitle("Connecting…")
+        self._ss_connect_btn.set_sensitive(False)
+
+        def work():
+            return ss_mod.connect(host, key)
+
+        def done(session) -> None:
+            config.settings.set("soulsync_host", session.host)
+            config.settings.set("soulsync_api_key", session.api_key)
+            self._ss_status.set_title("Connected")
+            self._ss_status.set_subtitle(session.host)
+            self._ss_connect_btn.set_label("Disconnect")
+            self._ss_connect_btn.set_sensitive(True)
+            self._ss_connect_btn.remove_css_class("suggested-action")
+            self.window.toast("SoulSync connected")
+
+        def fail(exc: Exception) -> None:
+            config.settings.set("soulsync_api_key", "")
+            self._ss_status.set_title("Not connected")
+            self._ss_status.set_subtitle(str(exc))
+            self._ss_connect_btn.set_sensitive(True)
+            self.window.toast(f"SoulSync: {exc}")
+
+        run_async(work, done, fail, name="riff-ss-connect")
+
+    def _on_slskd_connect(self, _btn) -> None:
+        from ..core import slskd as slskd_mod
+
+        host = self._sk_host.get_text().strip()
+        key = self._sk_key.get_text().strip()
+        config.settings.set("slskd_host", host)
+        config.settings.set("slskd_api_key", key)
+
+        def work():
+            return slskd_mod.connect(host, key)
+
+        def done(session) -> None:
+            config.settings.set("slskd_host", session.host)
+            config.settings.set("slskd_api_key", session.api_key)
+            self.window.toast("slskd connected")
+
+        def fail(exc: Exception) -> None:
+            self.window.toast(f"slskd: {exc}")
+
+        run_async(work, done, fail, name="riff-slskd-connect")
+
     def _on_theme(self, row: Adw.ComboRow, _pspec) -> None:
         key = self._theme_keys[row.get_selected()]
         config.settings.set("theme", key)
@@ -412,6 +991,33 @@ class SettingsDialog(Adw.PreferencesDialog):
         value = _QUALITIES[row.get_selected()]
         config.settings.set("audio_quality", value)
         self.window.service.resolver.quality = value
+
+    def _on_match_art(self, enabled: bool) -> None:
+        config.settings.set("match_album_art", enabled)
+        from . import theme as theme_mod
+        if not enabled:
+            theme_mod.clear_dynamic_accent()
+        else:
+            self.window._on_track_accent(self.window.service.current_track)
+
+    def _on_normalize(self, enabled: bool) -> None:
+        config.settings.set("normalize_volume", enabled)
+        self.window.service.apply_audio_fx()
+
+    def _on_eq(self, preset: str) -> None:
+        config.settings.set("eq_preset", preset)
+        self.window.service.apply_audio_fx()
+
+    def _on_skip_silence(self, enabled: bool) -> None:
+        config.settings.set("skip_silence", enabled)
+        self.window.service.apply_audio_fx()
+
+    def _on_speed(self, speed: float) -> None:
+        self.window.service.set_playback_speed(speed)
+
+    def _on_keep_pitch(self, enabled: bool) -> None:
+        config.settings.set("keep_pitch", enabled)
+        self.window.service.apply_playback_speed()
 
     def _on_radio(self, row: Adw.SwitchRow, _pspec) -> None:
         config.settings.set("autoplay_radio", bool(row.get_active()))

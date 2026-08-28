@@ -187,6 +187,10 @@ def build_track_menu(window, track: Track, on_favorite=None):
            if window.library.is_disliked(track.video_id)
            else "Never Play This")
     sec2.append(dis, "trk.dislike")
+    # Meld: swap to another YouTube upload of the same song.
+    from ..core.stream import extract_youtube_video_id
+    if extract_youtube_video_id(track.video_id or ""):
+        sec2.append("Change YouTube version…", "trk.change-yt")
     menu.append_section(None, sec2)
 
     sec3 = Gio.Menu()
@@ -231,6 +235,32 @@ def build_track_menu(window, track: Track, on_favorite=None):
                 window.open_artist(aid)
                 return
 
+    def change_youtube_version():
+        def accept(text: str) -> None:
+            from ..core.stream import extract_youtube_video_id
+            vid = extract_youtube_video_id(text)
+            if not vid:
+                window.toast("Couldn't parse a YouTube video id")
+                return
+            # Prefer swapping the live queue entry when this is current.
+            cur = window.service.current_track
+            if cur is not None and cur.video_id == track.video_id:
+                if window.service.replace_current_video_id(vid):
+                    window.toast("Switched YouTube version")
+                else:
+                    window.toast("Couldn't switch YouTube version")
+                return
+            track.video_id = vid
+            window.service.play_tracks([track])
+            window.toast("Switched YouTube version")
+
+        window.prompt_text(
+            "Change YouTube version",
+            "Paste a YouTube / YouTube Music URL or video id",
+            accept,
+            accept_label="Switch",
+        )
+
     actions = {
         "play-next": lambda: (window.service.add_next([track]),
                               window.toast("Playing next")),
@@ -245,6 +275,7 @@ def build_track_menu(window, track: Track, on_favorite=None):
         "download": lambda: window.download_track(track),
         "go-album": lambda: window.open_album(track.album_id),
         "go-artist": go_artist,
+        "change-yt": change_youtube_version,
     }
     group = Gio.SimpleActionGroup()
     for name, cb in actions.items():
@@ -578,6 +609,76 @@ class ForYouStrip(Gtk.Box):
             row.append(CompactTrackChip(track, window, playlist=playlist))
         scroller.set_child(row)
         self.append(scroller)
+
+
+class DiscoverTrackStrip(Gtk.Box):
+    """Riff Mobile Quick Picks style: dense title/artist rows, no chrome."""
+
+    def __init__(self, title: str, tracks: list[Track], window,
+                 subtitle: str = ""):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        self.set_vexpand(False)
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        t = Gtk.Label(label=title)
+        t.add_css_class("title-3")
+        t.set_xalign(0.0)
+        t.set_hexpand(True)
+        header.append(t)
+        if subtitle:
+            s = Gtk.Label(label=subtitle)
+            s.add_css_class("dim-label")
+            s.add_css_class("caption")
+            header.append(s)
+        play = Gtk.Button()
+        iconutil.set_button(play, "media-playback-start-symbolic")
+        play.add_css_class("flat")
+        play.add_css_class("circular")
+        play.set_tooltip_text(f"Play {title}")
+        playlist = list(tracks[:16])
+        play.connect(
+            "clicked",
+            lambda *_: playlist and window.service.play_tracks(
+                playlist, start=0, source="discover"))
+        header.append(play)
+        self.append(header)
+
+        listbox = Gtk.ListBox()
+        listbox.set_selection_mode(Gtk.SelectionMode.NONE)
+        listbox.add_css_class("riff-discover-list")
+        listbox.connect(
+            "row-activated",
+            lambda _lb, row: window.service.play_tracks(
+                playlist, start=getattr(row, "track_index", 0),
+                source="discover"))
+        for i, track in enumerate(playlist):
+            row = Gtk.ListBoxRow()
+            row.track_index = i
+            row.set_activatable(True)
+            box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            box.set_margin_top(6)
+            box.set_margin_bottom(6)
+            box.set_margin_start(2)
+            box.set_margin_end(2)
+            art = CoverArt(48)
+            art.set_url(track.thumbnail)
+            box.append(art)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+            text.set_hexpand(True)
+            title_l = Gtk.Label(label=track.title or "Unknown")
+            title_l.set_xalign(0.0)
+            title_l.set_ellipsize(Pango.EllipsizeMode.END)
+            title_l.add_css_class("heading")
+            artist_l = Gtk.Label(label=track.artist or "")
+            artist_l.set_xalign(0.0)
+            artist_l.set_ellipsize(Pango.EllipsizeMode.END)
+            artist_l.add_css_class("dim-label")
+            artist_l.add_css_class("caption")
+            text.append(title_l)
+            text.append(artist_l)
+            box.append(text)
+            row.set_child(box)
+            listbox.append(row)
+        self.append(listbox)
 
 
 class Carousel(Gtk.Box):

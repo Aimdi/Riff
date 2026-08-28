@@ -104,7 +104,9 @@ def test_resolve_falls_back_to_next_client_set(monkeypatch):
     assert len(calls) == 2
     # first attempt uses yt-dlp defaults (no pinned player_client)
     assert calls[0][0] is None
-    assert calls[1][0] == {"youtube": {"player_client": ["android", "web"]}}
+    # Meld/Vivi low-gate client comes before the historic android/web ladder.
+    assert calls[1][0] == {
+        "youtube": {"player_client": ["android_vr", "android"]}}
     # audio resolves through music.youtube.com
     assert calls[0][1].startswith("https://music.youtube.com/watch?v=")
 
@@ -118,15 +120,18 @@ def test_resolve_skips_empty_results(monkeypatch):
 
 
 def test_resolve_total_failure_mentions_ytdlp_update(monkeypatch):
-    _fake_yt_dlp(monkeypatch, [RuntimeError("boom 1"), RuntimeError("boom 2"),
-                               RuntimeError("boom 3")])
+    # Four client ladders: defaults, android_vr, android/web, web_music/ios.
+    _fake_yt_dlp(monkeypatch, [
+        RuntimeError("boom 1"), RuntimeError("boom 2"),
+        RuntimeError("boom 3"), RuntimeError("boom 4"),
+    ])
     r = StreamResolver()
     try:
         r.resolve("abc")
         raise AssertionError("expected RuntimeError")
     except RuntimeError as exc:
         assert "yt-dlp" in str(exc)
-        assert "boom 3" in str(exc)
+        assert "boom 4" in str(exc)
 
 
 def test_resolve_video_uses_watch_page(monkeypatch):

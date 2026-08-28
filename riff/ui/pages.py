@@ -17,6 +17,7 @@ from .widgets import (
     CardGrid,
     Carousel,
     CoverArt,
+    DiscoverTrackStrip,
     ForYouStrip,
     TrackList,
     scroll_wrap,
@@ -74,6 +75,7 @@ class HomePage(ContentPage):
         self._box: Gtk.Box | None = None
         self._top: Gtk.Box | None = None
         self._for_you_host: Gtk.Box | None = None
+        self._mix_host: Gtk.Box | None = None
         self._for_you_busy = False
 
     def refresh(self, force: bool = False) -> None:
@@ -83,33 +85,37 @@ class HomePage(ContentPage):
 
     def _present(self, sections) -> None:
         self._loaded = True
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
-        box.set_margin_top(18)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=20)
+        box.set_margin_top(14)
         box.set_margin_bottom(120)
         box.set_margin_start(18)
         box.set_margin_end(18)
 
-        # Spotify-style greeting + shortcut grid (Liked Songs, AI Mix,
-        # recent playlists), then the personalized strips below.
-        try:
-            box.append(self._greeting_header())
-            shortcuts = self._shortcut_grid()
-            if shortcuts is not None:
-                box.append(shortcuts)
-        except Exception:  # noqa: BLE001 — Home must render regardless
-            log.exception("shortcut grid failed")
-
-        # Top strip: For you (AI / smart picks) → followed releases → YT home.
-        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        top = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
         box.append(top)
         self._top = top
         self._box = box
 
+        # First viewport (mobile): brand → Wave → shortcuts. Everything else
+        # sits below the fold so Home reads as one composition, not a dashboard.
+        try:
+            top.append(self._greeting_header())
+            if mobile:
+                top.append(self._riff_wave_hero())
+            shortcuts = self._shortcut_grid()
+            if shortcuts is not None:
+                top.append(shortcuts)
+        except Exception:  # noqa: BLE001 — Home must render regardless
+            log.exception("home hero failed")
+
+        if mobile:
+            top.append(self._zone_label("FOR YOU"))
+        else:
+            top.append(self._ai_mix_hero())
+
         self._for_you_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         top.append(self._for_you_host)
-
-        # Made for you / AI Mix hero — flagship surface (out of the menu).
-        top.append(self._ai_mix_hero())
 
         # Instant paint from cache, then refresh in the background.
         cached = self._cached_for_you()
@@ -124,26 +130,37 @@ class HomePage(ContentPage):
         if recent:
             top.append(ForYouStrip("Jump back in", recent, self.window))
 
-        if not sections and not cached:
-            # Still show the page shell; For you may fill in shortly.
-            pass
+        # Zone-B mixes (Rediscover / Fresh Finds / daily…).
+        self._mix_host = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        top.append(self._mix_host)
+        self._paint_cached_mixes()
+        self._ensure_home_mixes()
 
-        for section in sections or []:
+        explore_sections = list(sections or [])
+        if mobile and explore_sections:
+            top.append(self._zone_label("EXPLORE"))
+            # One composition below the fold — don't dump the whole YT home.
+            explore_sections = explore_sections[:3]
+
+        for section in explore_sections:
             tracks = [i for i in section.items if isinstance(i, Track)]
             others = [i for i in section.items if not isinstance(i, Track)]
             if others:
                 box.append(Carousel(section.title, others, self.window))
             elif tracks:
-                title = Gtk.Label(label=section.title)
-                title.add_css_class("title-3")
-                title.set_xalign(0.0)
-                box.append(title)
-                tl = TrackList(self.window, radio_on_single=True)
-                tl.set_tracks(tracks[:10])
-                box.append(tl)
+                if mobile:
+                    box.append(DiscoverTrackStrip(
+                        section.title, tracks[:10], self.window))
+                else:
+                    title = Gtk.Label(label=section.title)
+                    title.add_css_class("title-3")
+                    title.set_xalign(0.0)
+                    box.append(title)
+                    tl = TrackList(self.window, radio_on_single=True)
+                    tl.set_tracks(tracks[:10])
+                    box.append(tl)
 
         if not sections and not cached:
-            # Placeholder under For you if YT home is empty too.
             empty = status_page(
                 "emblem-music-symbolic", "Loading your feed…",
                 "Personal picks appear above as soon as they're ready.")
@@ -152,7 +169,13 @@ class HomePage(ContentPage):
         self.show_widget(scroll_wrap(box))
         self._load_followed_releases(top)
 
-    def _greeting_header(self) -> Gtk.Label:
+    def _zone_label(self, text: str) -> Gtk.Widget:
+        label = Gtk.Label(label=text)
+        label.add_css_class("riff-zone-label")
+        label.set_xalign(0.0)
+        return label
+
+    def _greeting_header(self) -> Gtk.Widget:
         import datetime
 
         hour = datetime.datetime.now().hour
@@ -167,60 +190,122 @@ class HomePage(ContentPage):
         name = str(config.settings.get("profile_name", "") or "").strip()
         if name:
             text = f"{text}, {name.split()[0]}"
+        # Mobile: brand is the hero signal; greeting is a quiet caption.
+        if str(config.settings.get("shell_layout", "mobile")) == "mobile":
+            wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            wrap.set_margin_bottom(2)
+            brand = Gtk.Label(label="Riff")
+            brand.add_css_class("title-1")
+            brand.add_css_class("riff-brand-hero")
+            brand.set_xalign(0.0)
+            wrap.append(brand)
+            greet = Gtk.Label(label=text)
+            greet.add_css_class("riff-greeting")
+            greet.set_xalign(0.0)
+            wrap.append(greet)
+            return wrap
         label = Gtk.Label(label=text)
-        label.add_css_class("title-1")
         label.set_xalign(0.0)
+        label.add_css_class("title-1")
         return label
 
     def _shortcut_grid(self) -> Gtk.Widget | None:
-        """Spotify's greeting grid: compact cover-left tiles for the stuff
-        you reach for daily — Liked Songs, AI Mix, your playlists."""
+        """Greeting grid — mobile uses the fixed Riff Mobile 6-tile set."""
         from .window import AI_MIX_PLAYLIST
 
         window = self.window
         tiles: list[tuple] = []  # (title, cover, glyph, callback)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
 
-        n_favs = len(window.library.favorites())
-        if n_favs:
-            tiles.append(("Liked Songs", None, "♥",
-                          lambda: window.goto("favorites")))
+        if mobile:
+            from ..core.mixes import load_cached_home_mixes, load_cached_radar
 
-        seen_names = set()
-        ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
-        if ai_pid is not None:
-            tracks = window.library.playlist_tracks(ai_pid)
-            if tracks:
-                seen_names.add(AI_MIX_PLAYLIST)
-                tiles.append((
-                    AI_MIX_PLAYLIST,
-                    [t.thumbnail for t in tracks[:8]], None,
-                    lambda p=ai_pid: window.open_local_playlist(
-                        p, AI_MIX_PLAYLIST)))
+            mix_map = {
+                sid: tracks
+                for sid, _title, tracks in load_cached_home_mixes(window.library)
+            }
+            radar = load_cached_radar(window.library)
 
-        for item in window.library.playlist_tree():
-            entries = ([(item["id"], item["name"])]
-                       if item["kind"] == "playlist"
-                       else [(pid, name)
-                             for pid, name, _c in item["playlists"]])
-            for pid, name in entries:
-                if len(tiles) >= 8:
-                    break
-                if name in seen_names:
-                    continue
-                seen_names.add(name)
-                tracks = window.library.playlist_tracks(pid)
-                if not tracks:
-                    continue
-                tiles.append((
-                    name, [t.thumbnail for t in tracks[:8]], None,
-                    lambda p=pid, n=name: window.open_local_playlist(p, n)))
+            def _play_or_goto(tracks, fallback_page, source):
+                if tracks:
+                    window.service.play_tracks(
+                        list(tracks), start=0, source=source)
+                else:
+                    window.goto(fallback_page)
 
-        if len(tiles) < 8:
-            recent = window.library.recent(1)
-            if recent:
-                tiles.append(("Recently played", [
-                    t.thumbnail for t in window.library.recent(8)], None,
-                    lambda: window.goto("history")))
+            recent_thumbs = [
+                t.thumbnail for t in window.library.recent(8) if t.thumbnail]
+            fresh_thumbs = [
+                t.thumbnail for t in (mix_map.get("fresh_finds") or [])[:8]
+                if t.thumbnail]
+            redis_thumbs = [
+                t.thumbnail for t in (mix_map.get("rediscover") or [])[:8]
+                if t.thumbnail]
+            radar_thumbs = [t.thumbnail for t in (radar or [])[:8] if t.thumbnail]
+            # Glyph fallbacks when caches are empty — live testing showed
+            # identical list placeholders making the Discover grid unreadable.
+            tiles = [
+                ("Favorites", None, "♥", "riff-liked-tile",
+                 lambda: window.goto("favorites")),
+                ("Recently played", recent_thumbs or None,
+                 "◷" if not recent_thumbs else None, "riff-tile-recent",
+                 lambda: window.goto("history")),
+                ("Fresh Finds", fresh_thumbs or None,
+                 "✦" if not fresh_thumbs else None, "riff-tile-fresh",
+                 lambda: _play_or_goto(
+                     mix_map.get("fresh_finds"), "explore", "fresh_finds")),
+                ("Rediscover", redis_thumbs or None,
+                 "↺" if not redis_thumbs else None, "riff-tile-rediscover",
+                 lambda: _play_or_goto(
+                     mix_map.get("rediscover"), "favorites", "rediscover")),
+                ("Release Radar", radar_thumbs or None,
+                 "◎" if not radar_thumbs else None, "riff-tile-radar",
+                 lambda: _play_or_goto(radar, "artists", "release_radar")),
+                ("Downloads", None, "↓", "riff-tile-downloads",
+                 lambda: window.goto("downloads")),
+            ]
+        else:
+            n_favs = len(window.library.favorites())
+            if n_favs:
+                tiles.append(("Liked Songs", None, "♥", "riff-liked-tile",
+                              lambda: window.goto("favorites")))
+            seen_names = set()
+            ai_pid = window.library.find_playlist(AI_MIX_PLAYLIST)
+            if ai_pid is not None:
+                thumbs = window.library.playlist_thumbnails(ai_pid, 8)
+                if thumbs:
+                    seen_names.add(AI_MIX_PLAYLIST)
+                    tiles.append((
+                        AI_MIX_PLAYLIST, thumbs, None, "",
+                        lambda p=ai_pid: window.open_local_playlist(
+                            p, AI_MIX_PLAYLIST)))
+            for item in window.library.playlist_tree():
+                entries = ([(item["id"], item["name"])]
+                           if item["kind"] == "playlist"
+                           else [(pid, name)
+                                 for pid, name, _c in item["playlists"]])
+                for pid, name in entries:
+                    if len(tiles) >= 8:
+                        break
+                    if name in seen_names:
+                        continue
+                    seen_names.add(name)
+                    thumbs = window.library.playlist_thumbnails(pid, 8)
+                    if not thumbs:
+                        continue
+                    tiles.append((
+                        name, thumbs, None, "",
+                        lambda p=pid, n=name: window.open_local_playlist(p, n)))
+            if len(tiles) < 8:
+                recent = window.library.recent(1)
+                if recent:
+                    thumbs = [
+                        t.thumbnail for t in window.library.recent(8)
+                        if t.thumbnail]
+                    tiles.append((
+                        "Recently played", thumbs or None,
+                        "◷" if not thumbs else None, "riff-tile-recent",
+                        lambda: window.goto("history")))
 
         if not tiles:
             return None
@@ -229,25 +314,126 @@ class HomePage(ContentPage):
         grid.set_selection_mode(Gtk.SelectionMode.NONE)
         grid.set_homogeneous(True)
         grid.set_min_children_per_line(2)
-        grid.set_max_children_per_line(4)
+        grid.set_max_children_per_line(3 if mobile else 4)
         grid.set_column_spacing(10)
         grid.set_row_spacing(10)
-        for title, cover, glyph, cb in tiles[:8]:
-            grid.append(self._shortcut_tile(title, cover, glyph, cb))
+        for title, cover, glyph, style, cb in tiles[:8]:
+            grid.append(self._shortcut_tile(
+                title, cover, glyph, cb, tile_style=style))
         return grid
 
-    def _shortcut_tile(self, title: str, cover, glyph, callback):
+    def _riff_wave_hero(self) -> Gtk.Widget:
+        """Riff Wave — mobile-style product hero (art + play + moods)."""
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.add_css_class("riff-wave-card")
+        card.set_margin_top(2)
+        card.set_margin_bottom(2)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=14)
+        art = CoverArt(72)
+        thumbs = [
+            t.thumbnail for t in self.window.library.recent(6) if t.thumbnail]
+        if not thumbs:
+            thumbs = [
+                t.thumbnail for t in self.window.library.favorites()[:6]
+                if t.thumbnail]
+        if thumbs:
+            art.set_urls(thumbs[:4])
+        row.append(art)
+
+        meta = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        meta.set_hexpand(True)
+        meta.set_valign(Gtk.Align.CENTER)
+        title = Gtk.Label(label="Riff Wave")
+        title.add_css_class("title-3")
+        title.set_xalign(0.0)
+        meta.append(title)
+        sub = Gtk.Label(label="Personal radio from your taste")
+        sub.add_css_class("dim-label")
+        sub.add_css_class("caption")
+        sub.set_xalign(0.0)
+        sub.set_wrap(True)
+        meta.append(sub)
+        row.append(meta)
+
+        play = Gtk.Button()
+        iconutil.set_button(play, "media-playback-start-symbolic")
+        play.add_css_class("suggested-action")
+        play.add_css_class("riff-wave-play")
+        play.set_tooltip_text("Start Wave")
+        play.set_valign(Gtk.Align.CENTER)
+        play.connect("clicked", self._on_start_wave)
+        row.append(play)
+        card.append(row)
+
+        moods = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        try:
+            current = float(config.settings.get("exploration", 0.3) or 0.3)
+        except (TypeError, ValueError):
+            current = 0.3
+        options = (("Familiar", 0.15), ("Balanced", 0.5), ("Adventurous", 0.85))
+        nearest = min(options, key=lambda ov: abs(ov[1] - current))[0]
+        group: Gtk.ToggleButton | None = None
+        for label, value in options:
+            btn = Gtk.ToggleButton(label=label)
+            btn.add_css_class("pill")
+            btn.add_css_class("riff-wave-mood")
+            if group is None:
+                group = btn
+            else:
+                btn.set_group(group)
+            btn.set_active(label == nearest)
+
+            def _pick(_b, v=value) -> None:
+                if _b.get_active():
+                    config.settings.set("exploration", v)
+
+            btn.connect("toggled", _pick)
+            moods.append(btn)
+        card.append(moods)
+        return card
+
+    def _on_start_wave(self, *_a) -> None:
+        from ..core import wave as wave_mod
+
+        win = self.window
+        play_btn = None
+
+        def work():
+            return wave_mod.build_wave(
+                win.api, win.library, win.service.discovery,
+                current=win.service.current_track, limit=25)
+
+        def done(tracks: list[Track]) -> None:
+            if not tracks:
+                win.toast("Wave needs a little listening history first")
+                return
+            win.service.play_tracks(tracks, start=0, source="riff_wave")
+            win.toast(f"Wave · {len(tracks)} songs")
+
+        def fail(exc: Exception) -> None:
+            win.toast(f"Wave unavailable: {exc}")
+
+        run_async(work, done, fail, name="riff-wave")
+        _ = play_btn
+
+    def _shortcut_tile(
+        self, title: str, cover, glyph, callback, *, tile_style: str = "",
+    ):
         btn = Gtk.Button()
         btn.add_css_class("riff-shortcut")
         btn.connect("clicked", lambda *_: callback())
         row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
-        if glyph:
-            tile = Gtk.Label(label=glyph)
+        urls = [u for u in (cover or []) if u]
+        if glyph or not urls:
+            tile = Gtk.Label(label=glyph or "♪")
             tile.add_css_class("riff-liked-tile")
+            if tile_style:
+                tile.add_css_class(tile_style)
             tile.set_size_request(56, 56)
         else:
             tile = CoverArt(56, icon="view-list-symbolic")
-            tile.set_urls(cover or [])
+            tile.set_urls(urls)
         row.append(tile)
         label = Gtk.Label(label=title)
         label.add_css_class("heading")
@@ -380,7 +566,7 @@ class HomePage(ContentPage):
         host.append(row)
 
     def show_for_you(self, tracks: list[Track], *, source: str = "ai") -> None:
-        """Paint a compact horizontal For you strip (not a full track list)."""
+        """Paint For you — Discover list on mobile shell, chips on desktop."""
         host = self._for_you_host
         if host is None or not tracks:
             return
@@ -392,8 +578,98 @@ class HomePage(ContentPage):
             "radio": "From your taste",
             "cache": "AI",
         }.get(source, "")
-        host.append(ForYouStrip(
-            "For you", tracks[:10], self.window, subtitle=subtitle))
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        if mobile:
+            host.append(DiscoverTrackStrip(
+                "Discover", tracks[:12], self.window, subtitle=subtitle))
+        else:
+            host.append(ForYouStrip(
+                "For you", tracks[:10], self.window, subtitle=subtitle))
+
+    def _paint_cached_mixes(self) -> None:
+        from ..core.mixes import load_cached_home_mixes
+
+        host = getattr(self, "_mix_host", None)
+        if host is None:
+            return
+        rows = load_cached_home_mixes(self.window.library)
+        if rows:
+            self._paint_mix_rows(rows)
+
+    def _paint_mix_rows(self, rows: list) -> None:
+        host = getattr(self, "_mix_host", None)
+        if host is None:
+            return
+        while child := host.get_first_child():
+            host.remove(child)
+        mobile = str(config.settings.get("shell_layout", "mobile")) == "mobile"
+        for _sid, title, tracks in rows:
+            if mobile:
+                host.append(DiscoverTrackStrip(title, tracks, self.window))
+            else:
+                host.append(ForYouStrip(title, tracks, self.window))
+
+    def _ensure_home_mixes(self) -> None:
+        """Background rebuild of Zone-B mixes + Release Radar (Riff Mobile)."""
+        from ..core import mixes as mixes_mod
+
+        win = self.window
+        mixes_need = mixes_mod.home_mixes_stale(win.library)
+        radar_need = mixes_mod.release_radar_stale(win.library)
+        if not mixes_need and not radar_need:
+            return
+
+        def work():
+            rows = mixes_mod.load_cached_home_mixes(win.library)
+            if mixes_need:
+                red = mixes_mod.rediscover_tracks(win.library)
+                fresh: list[Track] = []
+                daily: list = []
+                quick: list[Track] = []
+                because: list[Track] = []
+                try:
+                    fresh = mixes_mod.fresh_finds(
+                        win.service.discovery, limit=24)
+                except Exception:  # noqa: BLE001
+                    log.exception("fresh finds failed")
+                try:
+                    daily = mixes_mod.daily_mixes(
+                        win.service.discovery, mix_count=3)
+                except Exception:  # noqa: BLE001
+                    log.exception("daily mixes failed")
+                try:
+                    quick = mixes_mod.quick_picks(
+                        win.service.discovery, limit=20)
+                except Exception:  # noqa: BLE001
+                    log.exception("quick picks failed")
+                try:
+                    seeds = win.library.favorites()[:1] or win.library.recent(1)
+                    if seeds:
+                        because = win.service.discovery.similar_songs(
+                            seeds[0], limit=12)
+                except Exception:  # noqa: BLE001
+                    log.exception("because-you-liked failed")
+                rows = mixes_mod.assemble_home_mix_rows(
+                    rediscover=red, fresh=fresh, daily=daily,
+                    quick=quick, because=because,
+                    max_rows=3, min_count=4)
+                if rows:
+                    mixes_mod.store_home_mixes(win.library, rows)
+            if radar_need:
+                try:
+                    radar = mixes_mod.release_radar(
+                        win.api, win.library, limit=30)
+                    if radar:
+                        mixes_mod.store_release_radar(win.library, radar)
+                except Exception:  # noqa: BLE001
+                    log.exception("release radar failed")
+            return rows
+
+        def done(rows) -> None:
+            if rows:
+                self._paint_mix_rows(rows)
+
+        run_async(work, done, lambda _e: None, name="riff-home-mixes")
 
     def _ensure_for_you(self) -> None:
         """Background: AI Mix if possible, else radio-based picks."""
@@ -467,8 +743,11 @@ class HomePage(ContentPage):
 
         def done(items) -> None:
             if items and top is self._top:
-                top.append(Carousel(
-                    "New from artists you follow", items, self.window))
+                title = (
+                    "Release Radar" if str(config.settings.get(
+                        "shell_layout", "mobile")) == "mobile"
+                    else "New from artists you follow")
+                top.append(Carousel(title, items, self.window))
 
         run_async(work, done, lambda _e: None, name="riff-follows")
 
@@ -1415,7 +1694,15 @@ class StatsPage(ContentPage):
     def _present(self, data) -> None:
         overview, prev, top_songs, top_artists, days = data
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=22)
-        box.append(self._range_selector())
+        top = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        top.append(self._range_selector())
+        rewind_btn = Gtk.Button(label="Riff Rewind")
+        rewind_btn.add_css_class("suggested-action")
+        rewind_btn.add_css_class("pill")
+        rewind_btn.set_valign(Gtk.Align.CENTER)
+        rewind_btn.connect("clicked", lambda *_: self._show_rewind())
+        top.append(rewind_btn)
+        box.append(top)
 
         if not overview["plays"]:
             box.append(status_page(
@@ -1566,6 +1853,79 @@ class StatsPage(ContentPage):
                 row_a.add_suffix(bar)
                 lb.append(row_a)
             box.append(lb)
+
+        self.show_widget(scroll_wrap(_padded(box)))
+
+    def _show_rewind(self) -> None:
+        from ..core import rewind as rewind_mod
+
+        data = rewind_mod.build_rewind(self.window.library)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
+        back = Gtk.Button(label="← Stats")
+        back.add_css_class("flat")
+        back.set_halign(Gtk.Align.START)
+        back.connect("clicked", lambda *_: self.refresh())
+        box.append(back)
+
+        title = Gtk.Label(label="Riff Rewind")
+        title.add_css_class("title-1")
+        title.set_xalign(0.0)
+        box.append(title)
+        sub = Gtk.Label(
+            label="Your listening story from local history — "
+                  "no account, no server.")
+        sub.add_css_class("dim-label")
+        sub.set_wrap(True)
+        sub.set_xalign(0.0)
+        box.append(sub)
+
+        if not data.get("enough"):
+            box.append(status_page(
+                "riff-stats-symbolic", "Not enough plays yet",
+                "Keep listening — Rewind unlocks after a handful of plays."))
+            self.show_widget(scroll_wrap(_padded(box)))
+            return
+
+        level = Gtk.Label(label=str(data["level"]))
+        level.add_css_class("title-1")
+        level.set_xalign(0.0)
+        box.append(level)
+        level_cap = Gtk.Label(label="Listener level")
+        level_cap.add_css_class("dim-label")
+        level_cap.set_xalign(0.0)
+        box.append(level_cap)
+
+        hours = data["seconds"] / 3600
+        hours_txt = f"{hours:.0f}" if hours >= 100 else f"{hours:.1f}"
+        for value, label in (
+            (str(data["plays"]), "total plays"),
+            (hours_txt, "hours listened"),
+            (str(data["artists"]), "artists explored"),
+        ):
+            line = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            v = Gtk.Label(label=value)
+            v.add_css_class("title-1")
+            line.append(v)
+            n = Gtk.Label(label=label)
+            n.add_css_class("title-3")
+            n.set_xalign(0.0)
+            n.set_hexpand(True)
+            line.append(n)
+            box.append(line)
+
+        if data.get("top_artist"):
+            name, plays = data["top_artist"]
+            art = Gtk.Label(label=f"Top artist · {name} ({plays})")
+            art.add_css_class("heading")
+            art.set_xalign(0.0)
+            box.append(art)
+        if data.get("top_song"):
+            track, plays = data["top_song"]
+            song = Gtk.Label(
+                label=f"Top song · {track.title} ({plays})")
+            song.add_css_class("heading")
+            song.set_xalign(0.0)
+            box.append(song)
 
         self.show_widget(scroll_wrap(_padded(box)))
 

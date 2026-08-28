@@ -123,15 +123,18 @@ THEMES: dict[str, Theme] = {
 DEFAULT_THEME = "pitch-black"
 
 _provider = None
+_accent_provider = None
+_last_theme_key = DEFAULT_THEME
 
 
 def apply(key: str, display=None) -> None:
     """Apply a theme by key; unknown keys fall back to the default."""
-    global _provider
+    global _provider, _last_theme_key
 
     from gi.repository import Adw, Gdk, Gtk
 
     theme = THEMES.get(key) or THEMES[DEFAULT_THEME]
+    _last_theme_key = key if key in THEMES else DEFAULT_THEME
 
     schemes = {
         "force-dark": Adw.ColorScheme.FORCE_DARK,
@@ -152,3 +155,43 @@ def apply(key: str, display=None) -> None:
         Gtk.StyleContext.add_provider_for_display(
             display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
         _provider = provider
+    # Re-apply dynamic accent on top of the base theme when active.
+    # Caller clears/sets via apply_dynamic_accent.
+
+
+def apply_dynamic_accent(
+    accent_bg: str, accent_fg: str, accent: str, display=None,
+) -> None:
+    """Overlay album-art accents (Vivi DynamicTheme lite)."""
+    global _accent_provider
+
+    from gi.repository import Gdk, Gtk
+
+    display = display or Gdk.Display.get_default()
+    if display is None:
+        return
+    clear_dynamic_accent(display)
+    css = _accent_only_css(accent_bg, accent_fg, accent)
+    # Also recolor pitch-black accent defines when those themes are active.
+    css += f"""
+@define-color accent_bg_color {accent_bg};
+@define-color accent_fg_color {accent_fg};
+@define-color accent_color {accent};
+"""
+    provider = Gtk.CssProvider()
+    provider.load_from_data(css.encode())
+    Gtk.StyleContext.add_provider_for_display(
+        display, provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 1)
+    _accent_provider = provider
+
+
+def clear_dynamic_accent(display=None) -> None:
+    global _accent_provider
+
+    from gi.repository import Gdk, Gtk
+
+    display = display or Gdk.Display.get_default()
+    if display is None or _accent_provider is None:
+        return
+    Gtk.StyleContext.remove_provider_for_display(display, _accent_provider)
+    _accent_provider = None

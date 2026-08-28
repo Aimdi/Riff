@@ -63,7 +63,21 @@ class PlaybackService:
         self._playing_track = None
         self._last_completed: str | None = None
         self._scrobbled_current = False
+        self._last_podcast_save_ts = 0.0
+        self._last_smart_queue_ts = 0.0
+        self._podcast_chapters: list = []
+        self._podcast_chapters_for: str | None = None
+        self._chapter_seek_inflight = False
+        # SponsorBlock (Meld) — segments for the current YouTube track.
+        self._sb_segments: list = []
+        self._sb_for: str | None = None
+        self._sb_seek_inflight = False
+        # Recover-before-skip: invalidate stream cache + re-resolve once.
+        self._stream_recover_for: str | None = None
+        self._stream_recover_count = 0
         self.video_mode = False
+        from .sleep_timer import SleepTimer
+        self.sleep_timer = SleepTimer(self._on_sleep_timer_fire)
         self._video: GstVideoPlayer | None = None
         self._using_gst_video = False
         self._video_state = STATE_STOPPED
@@ -80,6 +94,8 @@ class PlaybackService:
         self._attach_engine(engine)
 
         self.engine.set_volume(int(config.settings.get("volume", 100)))
+        self.apply_audio_fx()
+        self.apply_playback_speed()
 
     # -- public control ------------------------------------------------------
 
@@ -94,6 +110,57 @@ class PlaybackService:
         engine.on_duration = lambda d: self._emit(self.duration_listeners, d)
         engine.on_track_ended = self._on_track_ended
         engine.on_error = self._on_engine_error
+        self.apply_audio_fx(engine)
+        self.apply_playback_speed(engine)
+
+    def apply_audio_fx(self, engine=None) -> None:
+        """Apply EQ / loudnorm / skip-silence from settings to a deck."""
+        from . import audio_fx
+
+        eng = engine or self.engine
+        af = audio_fx.build_af(
+            eq_preset=str(config.settings.get("eq_preset", "flat") or "flat"),
+            normalize=bool(config.settings.get("normalize_volume", False)),
+            skip_silence=bool(config.settings.get("skip_silence", False)),
+        )
+        try:
+            eng.set_audio_filter(af)
+        except Exception:  # noqa: BLE001
+            log.debug("audio fx apply failed", exc_info=True)
+        spare = self._spare_engine
+        if spare is not None and spare is not eng:
+            try:
+                spare.set_audio_filter(af)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def apply_playback_speed(self, engine=None) -> None:
+        """Apply tempo (+ optional pitch correction) from settings."""
+        eng = engine or self.engine
+        try:
+            speed = float(config.settings.get("playback_speed", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            speed = 1.0
+        keep = bool(config.settings.get("keep_pitch", True))
+        try:
+            eng.set_speed(speed, keep_pitch=keep)
+        except Exception:  # noqa: BLE001
+            log.debug("playback speed apply failed", exc_info=True)
+        spare = self._spare_engine
+        if spare is not None and spare is not eng:
+            try:
+                spare.set_speed(speed, keep_pitch=keep)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def set_playback_speed(self, speed: float) -> None:
+        """Persist and apply a playback rate (full-player / settings)."""
+        try:
+            speed = max(0.5, min(2.5, float(speed)))
+        except (TypeError, ValueError):
+            speed = 1.0
+        config.settings.set("playback_speed", speed)
+        self.apply_playback_speed()
 
     @property
     def current_track(self) -> Track | None:
@@ -107,7 +174,11 @@ class PlaybackService:
     def play_tracks(self, tracks: list[Track], start: int = 0,
                     source: str = "user_click") -> None:
         """Replace the queue and start playing."""
-        playable = [t for t in tracks if t.video_id or t.local_path]
+        playable = [
+            t for t in tracks
+            if t.video_id or t.local_path or (t.stream_url or "").startswith(
+                ("http://", "https://"))
+        ]
         if not playable:
             return
         self._maybe_scrobble()
@@ -217,12 +288,59 @@ class PlaybackService:
                 self.engine.seek(pos)
 
     def add_next(self, tracks: list[Track], source: str = "queue") -> None:
+        tracks = self._filter_queue_dupes(tracks)
+        if not tracks:
+            return
         self._tag_sources(tracks, source)
         self.queue.add_next(tracks)
 
     def add_to_queue(self, tracks: list[Track], source: str = "queue") -> None:
+        tracks = self._filter_queue_dupes(tracks)
+        if not tracks:
+            return
         self._tag_sources(tracks, source)
         self.queue.add_end(tracks)
+
+    def _filter_queue_dupes(self, tracks: list[Track]) -> list[Track]:
+        """Drop tracks already in the queue when prevent_queue_duplicates."""
+        if not config.settings.get("prevent_queue_duplicates", True):
+            return list(tracks)
+        known = {t.video_id for t in self.queue.tracks if t.video_id}
+        out: list[Track] = []
+        for t in tracks:
+            vid = t.video_id or ""
+            if vid and vid in known:
+                continue
+            out.append(t)
+            if vid:
+                known.add(vid)
+        return out
+
+    def replace_current_video_id(self, new_video_id: str) -> bool:
+        """Swap the current track's YouTube id and re-resolve (Meld)."""
+        from . import sponsorblock as sb
+
+        vid = (new_video_id or "").strip()
+        if not sb.is_eligible_video_id(vid):
+            return False
+        track = self.queue.current
+        if track is None:
+            return False
+        old = track.video_id
+        track.video_id = vid
+        if old:
+            try:
+                self.resolver.invalidate(old)
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self.resolver.invalidate(vid)
+        except Exception:  # noqa: BLE001
+            pass
+        self._stream_recover_for = None
+        self._stream_recover_count = 0
+        self._start_current()
+        return True
 
     def shutdown(self) -> None:
         self._log_play_transition(natural=False)
@@ -257,6 +375,58 @@ class PlaybackService:
         # Scrubber always follows mpv audio (video is visual-only).
         self._emit(self.position_listeners, pos)
         self._maybe_begin_crossfade(pos)
+        self._maybe_save_podcast_progress(pos)
+        self._maybe_skip_podcast_ad(pos)
+        self._maybe_skip_sponsorblock(pos)
+        self._maybe_smart_queue_inject()
+
+    def _on_sleep_timer_fire(self) -> None:
+        """Pause playback when a timed sleep timer expires."""
+        try:
+            if self.engine.state == STATE_PLAYING:
+                self.engine.toggle_pause()
+        except Exception:  # noqa: BLE001
+            log.debug("sleep timer pause failed", exc_info=True)
+        self._emit(self.error_listeners, "Sleep timer — paused")
+
+    def _maybe_smart_queue_inject(self) -> None:
+        """When few tracks remain, inject similar songs (mobile SmartQueue)."""
+        import time
+
+        if not config.settings.get("smart_queue_injection", True):
+            return
+        track = self.queue.current
+        if track is None or not track.video_id:
+            return
+        if (track.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")):
+            return
+        if (track.stream_url or "").startswith(("http://", "https://")):
+            return
+        if track.local_path:
+            return
+        remaining = max(
+            0, len(self.queue.tracks) - self.queue.current_index - 1)
+        if remaining > 2:
+            return
+        now = time.monotonic()
+        if now - self._last_smart_queue_ts < 20.0:
+            return
+        self._last_smart_queue_ts = now
+        seed = track
+
+        def work():
+            return self.discovery.similar_songs(seed, limit=5)
+
+        def done(tracks: list[Track]) -> None:
+            known = {t.video_id for t in self.queue.tracks}
+            fresh = [t for t in tracks if t.video_id and t.video_id not in known][:3]
+            if not fresh:
+                return
+            self._tag_sources(fresh, "smart_queue")
+            self.queue.add_end(fresh)
+
+        run_async(work, done, lambda _e: None, name="riff-smart-queue")
 
     # -- crossfade ------------------------------------------------------------
 
@@ -442,6 +612,13 @@ class PlaybackService:
         self._cancel_fade()
         self._play_token += 1
         self._scrobbled_current = False
+        self._sb_segments = []
+        self._sb_for = None
+        self._sb_seek_inflight = False
+        # Fresh track → allow one recover attempt again.
+        if self._stream_recover_for != (track.video_id or ""):
+            self._stream_recover_for = track.video_id or None
+            self._stream_recover_count = 0
         token = self._play_token
         self._stop_video_backend()
         self._emit(self.track_listeners, track)
@@ -454,6 +631,20 @@ class PlaybackService:
                 self.engine.play_uri(local)
                 self._after_start(track)
                 return
+
+        # Podcasts / direct streams — no yt-dlp.
+        stream = (track.stream_url or "").strip()
+        if stream.startswith(("http://", "https://")):
+            self.engine.play_uri(stream)
+            self._after_start(track)
+            return
+        if (track.video_id or "").startswith("podcast_"):
+            self._emit(
+                self.error_listeners,
+                f"Couldn't play “{track.title}”: missing stream URL")
+            if self.queue.has_next():
+                self.next()
+            return
 
         want_video = self.video_mode and bool(track.video_id)
 
@@ -513,8 +704,10 @@ class PlaybackService:
                 return
             log.warning("failed to resolve %s: %s", track.video_id, exc)
             self._emit(self.error_listeners, f"Couldn't play “{track.title}”: {exc}")
-            # Skip to the next track instead of going silent.
-            if self.queue.has_next():
+            if self._try_stream_recover(track, reason="resolve"):
+                return
+            if (config.settings.get("auto_skip_on_error", True)
+                    and self.queue.has_next()):
                 self.next()
 
         self._emit(self.state_listeners, STATE_LOADING)
@@ -545,12 +738,221 @@ class PlaybackService:
         self._video_pos_id = GLib.timeout_add(1000, tick)
 
     def _after_start(self, track: Track) -> None:
+        self.apply_playback_speed()
         run_async(lambda: self.library.record_play(track), name="riff-history")
         self._prefetch_next()
+        self._maybe_resume_podcast(track)
+        self._load_podcast_chapters(track)
+        self._load_sponsorblock(track)
+
+    def _maybe_resume_podcast(self, track: Track) -> None:
+        from . import podcast_progress as pp
+
+        if not pp.is_podcast_track(track):
+            return
+        row = self.library.podcast_progress(track.video_id)
+        if not row:
+            return
+        seek_to = pp.resume_seconds(
+            int(row.get("position_ms") or 0),
+            int(row.get("duration_ms") or 0),
+        )
+        if seek_to is None:
+            return
+        try:
+            self.engine.seek(seek_to)
+        except Exception:  # noqa: BLE001
+            log.debug("podcast resume seek failed", exc_info=True)
+
+    def _load_podcast_chapters(self, track: Track) -> None:
+        from . import podcast_progress as pp
+        from . import podcast_chapters as pc
+
+        self._podcast_chapters = []
+        self._podcast_chapters_for = None
+        self._chapter_seek_inflight = False
+        if not pp.is_podcast_track(track):
+            return
+        url = (getattr(track, "chapters_url", "") or "").strip()
+        if not url:
+            return
+        vid = track.video_id
+
+        def work():
+            return pc.fetch_chapters(url)
+
+        def done(chapters) -> None:
+            cur = self.queue.current
+            if cur is None or cur.video_id != vid:
+                return
+            self._podcast_chapters = chapters or []
+            self._podcast_chapters_for = vid
+
+        run_async(work, done, lambda _e: None, name="riff-pod-chapters")
+
+    def _maybe_skip_podcast_ad(self, pos: float) -> None:
+        """Auto-skip Podcasting 2.0 sponsor/ad chapters (mobile parity)."""
+        from . import podcast_chapters as pc
+
+        if not config.settings.get("podcast_auto_skip_ads", True):
+            return
+        if self._chapter_seek_inflight or not self._podcast_chapters:
+            return
+        track = self.queue.current
+        if track is None or track.video_id != self._podcast_chapters_for:
+            return
+        current = pc.chapter_at(self._podcast_chapters, float(pos or 0))
+        if current is None or not current.is_ad:
+            return
+        target = pc.end_of_chapter(self._podcast_chapters, current)
+        if target is None:
+            return
+        total = float(self.engine.duration or track.duration or 0)
+        if total > 0 and target >= total - 0.4:
+            return
+        self._chapter_seek_inflight = True
+        try:
+            self.engine.seek(target)
+        except Exception:  # noqa: BLE001
+            log.debug("podcast ad skip seek failed", exc_info=True)
+        finally:
+            # Brief latch so position ticks don't re-seek mid-jump.
+            def _clear():
+                self._chapter_seek_inflight = False
+                return False
+            try:
+                from gi.repository import GLib
+                GLib.timeout_add(350, _clear)
+            except Exception:  # noqa: BLE001
+                self._chapter_seek_inflight = False
+
+    def _load_sponsorblock(self, track: Track) -> None:
+        """Fetch SponsorBlock segments for a YouTube track (opt-in)."""
+        from . import sponsorblock as sb
+
+        self._sb_segments = []
+        self._sb_for = None
+        if not config.settings.get("sponsorblock", False):
+            return
+        if track is None or not sb.is_eligible_video_id(track.video_id):
+            return
+        vid = track.video_id
+
+        def work():
+            return sb.fetch_segments(vid)
+
+        def done(segments) -> None:
+            cur = self.queue.current
+            if cur is None or cur.video_id != vid:
+                return
+            self._sb_segments = segments or []
+            self._sb_for = vid
+
+        run_async(work, done, lambda _e: None, name="riff-sponsorblock")
+
+    def _maybe_skip_sponsorblock(self, pos: float) -> None:
+        """Seek past SponsorBlock skip segments while they play."""
+        from . import sponsorblock as sb
+
+        if not config.settings.get("sponsorblock", False):
+            return
+        if self._sb_seek_inflight or not self._sb_segments:
+            return
+        track = self.queue.current
+        if track is None or track.video_id != self._sb_for:
+            return
+        hit = sb.segment_at(self._sb_segments, float(pos or 0))
+        if hit is None:
+            return
+        target = float(hit.end)
+        total = float(self.engine.duration or track.duration or 0)
+        if total > 0 and target >= total - 0.4:
+            return
+        self._sb_seek_inflight = True
+        try:
+            self.engine.seek(target)
+        except Exception:  # noqa: BLE001
+            log.debug("SponsorBlock seek failed", exc_info=True)
+        finally:
+            if config.settings.get("sponsorblock_toast", True):
+                self._emit(
+                    self.error_listeners,
+                    f"Skipped {hit.label}",
+                )
+
+            def _clear():
+                self._sb_seek_inflight = False
+                return False
+
+            try:
+                from gi.repository import GLib
+                GLib.timeout_add(350, _clear)
+            except Exception:  # noqa: BLE001
+                self._sb_seek_inflight = False
+
+    def _try_stream_recover(self, track: Track | None, *, reason: str) -> bool:
+        """Invalidate cached URL and re-resolve once before skipping (Meld)."""
+        if track is None or not track.video_id:
+            return False
+        if not config.settings.get("auto_skip_on_error", True):
+            return False
+        vid = track.video_id
+        if self._stream_recover_for != vid:
+            self._stream_recover_for = vid
+            self._stream_recover_count = 0
+        if self._stream_recover_count >= 1:
+            return False
+        self._stream_recover_count += 1
+        try:
+            self.resolver.invalidate(vid)
+        except Exception:  # noqa: BLE001
+            pass
+        log.info("stream recover (%s) for %s", reason, vid)
+        self._emit(self.error_listeners, "Retrying stream…")
+        self._start_current()
+        return True
+
+    def _maybe_save_podcast_progress(self, pos: float) -> None:
+        """Throttle-save podcast position (~every 5s), matching mobile."""
+        import time
+
+        from . import podcast_progress as pp
+
+        track = self.queue.current
+        if not pp.is_podcast_track(track):
+            return
+        dur = float(self.engine.duration or track.duration or 0)
+        if dur <= 0:
+            return
+        pos_ms = int(max(0.0, pos) * 1000)
+        dur_ms = int(dur * 1000)
+        near_end = pp.is_finished(pos_ms, dur_ms)
+        now = time.monotonic()
+        if not near_end and now - self._last_podcast_save_ts < 5.0:
+            return
+        self._last_podcast_save_ts = now
+        artists = track.artists or []
+        self.library.save_podcast_progress(
+            track.video_id,
+            title=track.title or "",
+            artist=artists[0] if artists else "",
+            artwork=track.thumbnail or "",
+            stream_url=track.stream_url or "",
+            position_ms=pos_ms,
+            duration_ms=dur_ms,
+            transcript_url=getattr(track, "transcript_url", "") or "",
+            transcript_type=getattr(track, "transcript_type", "") or "",
+        )
 
     def _prefetch_next(self) -> None:
         nxt = self.queue.peek_next()
         if not nxt or nxt.local_path or not nxt.video_id:
+            return
+        # Direct streams / podcasts already have a URI.
+        if (nxt.stream_url or "").startswith(("http://", "https://")):
+            return
+        if (nxt.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")):
             return
         if self.resolver.cached(nxt.video_id):
             return
@@ -561,6 +963,10 @@ class PlaybackService:
 
     def _extend_with_radio(self, seed: Track) -> None:
         if self._radio_pending or not seed.video_id:
+            return
+        if (seed.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")) or (
+                seed.stream_url or "").startswith(("http://", "https://")):
             return
         self._radio_pending = True
 
@@ -591,18 +997,38 @@ class PlaybackService:
     def _on_track_ended(self) -> None:
         self._log_play_transition(natural=True)
         self._maybe_scrobble()
+        if self.sleep_timer.on_track_ending():
+            try:
+                if self.engine.state == STATE_PLAYING:
+                    self.engine.toggle_pause()
+            except Exception:  # noqa: BLE001
+                pass
+            self._emit(self.error_listeners, "Sleep timer — paused")
+            self._emit(self.state_listeners, STATE_STOPPED)
+            return
+        ended = self.queue.current
+        if ended and (ended.video_id or "").startswith("podcast_"):
+            self.library.clear_podcast_progress(ended.video_id)
         nxt = self.queue.next(manual=False)
         if nxt is not None:
             self._start_current()
             return
         # Queue exhausted: optionally keep going with radio.
         cur = self.queue.current
-        if cur and config.settings.get("autoplay_radio", True):
+        if cur and config.settings.get("autoplay_radio", True) and not (
+                (cur.video_id or "").startswith(
+                    ("podcast_", "librivox_", "abs_", "cloud_"))
+                or (cur.stream_url or "").startswith(("http://", "https://"))):
             self._continue_radio_after(cur)
         else:
             self._emit(self.state_listeners, STATE_STOPPED)
 
     def _continue_radio_after(self, last: Track) -> None:
+        if (last.video_id or "").startswith(
+                ("podcast_", "librivox_", "abs_", "cloud_")):
+            self._emit(self.state_listeners, STATE_STOPPED)
+            return
+
         def fetch() -> list[Track]:
             return self.api.radio(last.video_id)
 
@@ -650,7 +1076,11 @@ class PlaybackService:
 
     def _on_engine_error(self, message: str) -> None:
         self._emit(self.error_listeners, message)
-        if self.queue.has_next():
+        track = self.queue.current
+        if self._try_stream_recover(track, reason="playback"):
+            return
+        if (config.settings.get("auto_skip_on_error", True)
+                and self.queue.has_next()):
             self.next()
 
     @staticmethod
