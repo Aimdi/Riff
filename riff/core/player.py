@@ -256,6 +256,23 @@ class PlayerEngine:
     def set_volume(self, volume: int) -> None:
         self._mpv.set_property("volume", max(0, min(130, int(volume))))
 
+    def set_audio_filter(self, filter_graph: str) -> None:
+        """Set mpv ``af`` chain (empty clears). Used for EQ / loudnorm."""
+        try:
+            self._mpv.set_property("af", filter_graph or "")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def set_speed(self, speed: float, *, keep_pitch: bool = True) -> None:
+        """Playback rate (Meld tempo). ``keep_pitch`` uses mpv pitch correction."""
+        speed = max(0.5, min(2.5, float(speed)))
+        try:
+            self._mpv.set_property(
+                "audio-pitch-correction", "yes" if keep_pitch else "no")
+            self._mpv.set_property("speed", speed)
+        except Exception:  # noqa: BLE001
+            pass
+
     def shutdown(self) -> None:
         self._shutdown.set()
         self._mpv.wakeup()

@@ -29,8 +29,27 @@ DEFAULTS = {
     "audio_quality": "high",  # "high" | "medium" | "low"
     "download_dir": DEFAULT_DOWNLOAD_DIR,
     "autoplay_radio": True,
+    "smart_queue_injection": True,  # auto-extend queue like mobile Smart Queue
     "crossfade": 0,  # seconds of blend between songs, 0 = off
     "exploration": 0.3,  # radio/discovery: 0 = familiar, 1 = adventurous
+    "podcast_continuous": True,  # auto-advance episodes in podcast queue
+    # Skip Podcasting 2.0 sponsor/ad chapters when markers are present.
+    "podcast_auto_skip_ads": True,
+    # Lyrics provider preference (mobile LyricsSource).
+    # "auto" | "better" | "lrclib" — KuGou is always a last-resort fallback.
+    "lyrics_source": "auto",
+    # Vivi-inspired polish.
+    "match_album_art": True,  # dynamic accent from cover (Pitch Black stays black)
+    "normalize_volume": False,  # mpv loudnorm-ish leveling across tracks
+    "eq_preset": "flat",  # flat | bass | vocal | night
+    # Meld-inspired playback.
+    "skip_silence": False,
+    "playback_speed": 1.0,
+    "keep_pitch": True,
+    "sponsorblock": False,  # opt-in; music_offtopic/intro/outro/sponsor
+    "sponsorblock_toast": True,
+    "auto_skip_on_error": True,
+    "prevent_queue_duplicates": True,
     "ai_provider": "anthropic",  # "local" | "anthropic" | "openai"
     "local_ai_model": "qwen2.5-3b",  # see riff.core.local_ai.MODELS
     "anthropic_api_key": "",
@@ -45,8 +64,29 @@ DEFAULTS = {
     "discord_rpc_enabled": False,
     "discord_client_id": "",  # Discord developer application id
     "local_music_dir": "~/Music",
+    # Audiobookshelf (self-hosted) — Lissen-compatible login + stream.
+    "abs_host": "",
+    "abs_username": "",
+    "abs_password": "",
+    "abs_token": "",
+    "abs_user_id": "",
+    "abs_library_id": "",
+    # Cloud — Subsonic-compatible self-hosted music (Navidrome, …).
+    "cloud_host": "",
+    "cloud_username": "",
+    "cloud_password": "",
+    "cloud_legacy_auth": False,
+    # SoulSync plugin (self-hosted search → download).
+    "soulsync_host": "",
+    "soulsync_api_key": "",
+    # Seeker / slskd (Soulseek via self-hosted slskd).
+    "slskd_host": "",
+    "slskd_api_key": "",
     "sidebar_collapsed": False,
     "expanded_folders": [],  # playlist folder ids open in the sidebar
+    # "mobile" = Riff Mobile shell (rail + mini player + full player);
+    # "desktop" = classic wide Spotify-style shell.
+    "shell_layout": "mobile",
     "theme": "pitch-black",  # see riff/ui/theme.py THEMES
     "profile_name": "",
     "profile_picture": "",

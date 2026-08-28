@@ -27,9 +27,13 @@ class NowPlayingPanel(Gtk.Box):
 
         self._lyrics_seq = 0
         self._lyrics_lines: list[tuple[float, str]] = []
-        self._lyrics_labels: list[Gtk.Label] = []
+        self._lyrics_ttml_lines: list = []
+        self._lyrics_labels: list[Gtk.Widget] = []
+        self._lyrics_word_labels: list[list[Gtk.Label]] = []
         self._lyrics_idx = -1
+        self._lyrics_word_idx = -1
         self._lyrics_video_id = ""
+        self._lyrics_source = ""
 
         header = Gtk.Label(label="Now Playing")
         header.add_css_class("heading")
@@ -166,6 +170,13 @@ class NowPlayingPanel(Gtk.Box):
         lyrics_stack.add_named(plain_scroll, "plain")
         self._lyrics_stack = lyrics_stack
         lyrics_box.append(lyrics_stack)
+        self._lyrics_source_label = Gtk.Label(label="")
+        self._lyrics_source_label.add_css_class("dim-label")
+        self._lyrics_source_label.add_css_class("riff-lyrics-source")
+        self._lyrics_source_label.set_xalign(0.0)
+        self._lyrics_source_label.set_margin_top(4)
+        self._lyrics_source_label.set_visible(False)
+        lyrics_box.append(self._lyrics_source_label)
         self._tabs.add_named(lyrics_box, "lyrics")
 
         self.append(self._tabs)
@@ -339,20 +350,35 @@ class NowPlayingPanel(Gtk.Box):
         vid = track.video_id
 
         def work():
-            synced, plain = lyrics_mod.fetch_lyrics(track)
-            if not synced and not plain:
+            from .. import config
+            source = str(config.settings.get("lyrics_source", "auto") or "auto")
+            hit = lyrics_mod.fetch_lyrics_result(track, source=source)
+            if hit is None:
                 plain = self.window.api.lyrics(track.video_id)
-            return synced, plain
+                if plain:
+                    return lyrics_mod.LyricsResult(
+                        synced=[], plain=plain, source="youtube")
+                return None
+            return hit
 
-        def done(result) -> None:
+        def done(hit) -> None:
             if seq != self._lyrics_seq:
                 return
-            synced, plain = result
             self._lyrics_video_id = vid
-            if synced:
-                self._show_synced(synced)
+            if hit is None:
+                self._show_plain("No lyrics found for this song.")
+                return
+            self._lyrics_source = hit.source or ""
+            self._set_lyrics_source_chip(hit.source or "")
+            if hit.ttml:
+                ttml_lines = lyrics_mod.parse_ttml(hit.ttml)
+                if any(l.has_words for l in ttml_lines):
+                    self._show_word_synced(ttml_lines)
+                    return
+            if hit.synced:
+                self._show_synced(hit.synced)
             else:
-                self._show_plain(plain or "No lyrics found for this song.")
+                self._show_plain(hit.plain or "No lyrics found for this song.")
 
         def fail(_exc) -> None:
             if seq != self._lyrics_seq:
@@ -362,19 +388,36 @@ class NowPlayingPanel(Gtk.Box):
 
         run_async(work, done, fail, name="riff-np-lyrics")
 
+    def _set_lyrics_source_chip(self, source: str) -> None:
+        labels = {
+            "better": "Synced via Better Lyrics",
+            "lrclib": "Synced via LRCLIB",
+            "kugou": "Synced via KuGou",
+            "youtube": "From YouTube Music",
+        }
+        text = labels.get((source or "").lower(), "")
+        self._lyrics_source_label.set_label(text)
+        self._lyrics_source_label.set_visible(bool(text))
+
     def _clear_lyrics_body(self) -> None:
         self._lyrics_list.remove_all()
         self._lyrics_labels = []
+        self._lyrics_word_labels = []
+        self._lyrics_ttml_lines = []
         self._lyrics_lines = []
         self._lyrics_idx = -1
+        self._lyrics_word_idx = -1
         self._lyrics_plain.set_label("")
         self._lyrics_plain.set_visible(False)
+        self._lyrics_source_label.set_visible(False)
 
     def _show_synced(self, lines: list[tuple[float, str]]) -> None:
         self._lyrics_status.set_visible(False)
         self._lyrics_stack.set_visible_child_name("synced")
         self._lyrics_lines = lines
+        self._lyrics_ttml_lines = []
         self._lyrics_labels = []
+        self._lyrics_word_labels = []
         self._lyrics_list.remove_all()
         for ts, text in lines:
             row = Gtk.ListBoxRow()
@@ -388,6 +431,46 @@ class NowPlayingPanel(Gtk.Box):
             row.set_child(label)
             self._lyrics_list.append(row)
             self._lyrics_labels.append(label)
+            self._lyrics_word_labels.append([])
+        self._on_position(0.0)
+
+    def _show_word_synced(self, ttml_lines: list) -> None:
+        """Vivi / YouLyPlus-style word karaoke from Better Lyrics TTML."""
+        self._lyrics_status.set_visible(False)
+        self._lyrics_stack.set_visible_child_name("synced")
+        self._lyrics_ttml_lines = ttml_lines
+        self._lyrics_lines = [(l.begin_sec, l.text) for l in ttml_lines]
+        self._lyrics_labels = []
+        self._lyrics_word_labels = []
+        self._lyrics_list.remove_all()
+        for line in ttml_lines:
+            row = Gtk.ListBoxRow()
+            row.timestamp = line.begin_sec
+            if line.has_words:
+                box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+                box.set_margin_top(4)
+                box.set_margin_bottom(4)
+                words: list[Gtk.Label] = []
+                for w in line.words:
+                    lab = Gtk.Label(label=w.text)
+                    lab.add_css_class("riff-lyric-word")
+                    lab.set_xalign(0.0)
+                    box.append(lab)
+                    words.append(lab)
+                row.set_child(box)
+                self._lyrics_labels.append(box)
+                self._lyrics_word_labels.append(words)
+            else:
+                label = Gtk.Label(label=line.text or "♪")
+                label.set_wrap(True)
+                label.set_xalign(0.0)
+                label.set_margin_top(3)
+                label.set_margin_bottom(3)
+                label.add_css_class("dim-label")
+                row.set_child(label)
+                self._lyrics_labels.append(label)
+                self._lyrics_word_labels.append([])
+            self._lyrics_list.append(row)
         self._on_position(0.0)
 
     def _show_plain(self, text: str) -> None:
@@ -396,28 +479,65 @@ class NowPlayingPanel(Gtk.Box):
         self._lyrics_plain.set_label(text)
         self._lyrics_plain.set_visible(True)
         self._lyrics_lines = []
+        self._lyrics_ttml_lines = []
         self._lyrics_labels = []
+        self._lyrics_word_labels = []
 
     def _on_position(self, pos: float) -> None:
         if not self._lyrics_lines or self._tabs.get_visible_child_name() != "lyrics":
             return
         idx = lyrics_mod.line_index_at(self._lyrics_lines, pos)
-        if idx == self._lyrics_idx:
+        if idx != self._lyrics_idx:
+            if 0 <= self._lyrics_idx < len(self._lyrics_labels):
+                prev = self._lyrics_labels[self._lyrics_idx]
+                if isinstance(prev, Gtk.Label):
+                    prev.remove_css_class("riff-lyric-current")
+                    prev.add_css_class("dim-label")
+            self._lyrics_idx = idx
+            self._lyrics_word_idx = -1
+            if 0 <= idx < len(self._lyrics_labels):
+                cur = self._lyrics_labels[idx]
+                if isinstance(cur, Gtk.Label):
+                    cur.remove_css_class("dim-label")
+                    cur.add_css_class("riff-lyric-current")
+                row = self._lyrics_list.get_row_at_index(idx)
+                scroller = self._lyrics_list.get_ancestor(Gtk.ScrolledWindow)
+                if row is not None and scroller is not None:
+                    vadj = scroller.get_vadjustment()
+                    target = row.get_allocation().y
+                    # Ease toward the line (Vivi-style presence, cheap).
+                    goal = max(0.0, target - vadj.get_page_size() / 2.5)
+                    now = vadj.get_value()
+                    vadj.set_value(now + (goal - now) * 0.55)
+        # Word-level highlight within the active TTML line.
+        if not (0 <= idx < len(self._lyrics_ttml_lines)):
             return
-        if 0 <= self._lyrics_idx < len(self._lyrics_labels):
-            self._lyrics_labels[self._lyrics_idx].remove_css_class(
-                "riff-lyric-current")
-            self._lyrics_labels[self._lyrics_idx].add_css_class("dim-label")
-        self._lyrics_idx = idx
-        if 0 <= idx < len(self._lyrics_labels):
-            self._lyrics_labels[idx].remove_css_class("dim-label")
-            self._lyrics_labels[idx].add_css_class("riff-lyric-current")
-            row = self._lyrics_list.get_row_at_index(idx)
-            scroller = self._lyrics_list.get_ancestor(Gtk.ScrolledWindow)
-            if row is not None and scroller is not None:
-                vadj = scroller.get_vadjustment()
-                target = row.get_allocation().y
-                vadj.set_value(max(0.0, target - vadj.get_page_size() / 2.5))
+        line = self._lyrics_ttml_lines[idx]
+        words = self._lyrics_word_labels[idx] if idx < len(
+            self._lyrics_word_labels) else []
+        if not line.has_words or not words:
+            return
+        widx = -1
+        for i, w in enumerate(line.words):
+            end = w.end_sec if w.end_sec is not None else (
+                line.words[i + 1].begin_sec if i + 1 < len(line.words)
+                else line.end_sec or (w.begin_sec + 0.6))
+            if w.begin_sec <= pos < (end or w.begin_sec + 0.6):
+                widx = i
+                break
+            if pos >= w.begin_sec:
+                widx = i
+        if widx == self._lyrics_word_idx:
+            return
+        self._lyrics_word_idx = widx
+        for i, lab in enumerate(words):
+            lab.remove_css_class("riff-lyric-word-active")
+            lab.remove_css_class("riff-lyric-word-done")
+            lab.add_css_class("riff-lyric-word")
+            if i < widx:
+                lab.add_css_class("riff-lyric-word-done")
+            elif i == widx:
+                lab.add_css_class("riff-lyric-word-active")
 
     # -- similar --------------------------------------------------------------
 

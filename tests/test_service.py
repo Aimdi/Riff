@@ -40,6 +40,13 @@ class FakeEngine:
     def set_volume(self, volume):
         self.volume = volume
 
+    def set_audio_filter(self, filter_graph):
+        self.af = filter_graph or ""
+
+    def set_speed(self, speed, *, keep_pitch=True):
+        self.speed = float(speed)
+        self.keep_pitch = bool(keep_pitch)
+
     def shutdown(self):
         pass
 
@@ -53,9 +60,13 @@ class FakeResolver:
     def __init__(self):
         self.resolved = []
         self.fail_ids = set()
+        self.invalidated = []
 
     def cached(self, video_id, *, video=False):
         return None
+
+    def invalidate(self, video_id):
+        self.invalidated.append(video_id)
 
     def resolve(self, video_id, *, video=False):
         if video_id in self.fail_ids:
