@@ -1,0 +1,11 @@
+---
+description: Keep diffs scoped; no drive-by refactors
+alwaysApply: true
+---
+
+# Scope discipline
+
+- Change only what the task requires. No drive-by cleanups, renames, or rewrites in unrelated files.
+- Do not edit markdown files the user did not ask for (agent scaffolding docs are an exception when that is the task).
+- One specialist owns a change set; do not mix Experience + Performance + Platform edits on the same hot files without sequencing.
+- Match existing naming, types, and abstraction level in the surrounding code.
