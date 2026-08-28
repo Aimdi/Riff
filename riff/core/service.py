@@ -648,42 +648,56 @@ class PlaybackService:
 
         want_video = self.video_mode and bool(track.video_id)
 
-        # Resolve off the main loop. Video mode always resolves audio for mpv
-        # and (when possible) a separate video URL for the cover-art surface.
-        def resolve() -> tuple[str, str | None]:
-            audio_url = self.resolver.resolve(track.video_id, video=False)
-            video_url = None
-            if want_video:
-                try:
-                    video_url = self.resolver.resolve(track.video_id, video=True)
-                except Exception:  # noqa: BLE001
-                    log.warning("video stream failed; audio only", exc_info=True)
-            return audio_url, video_url
+        # Resolve off the main loop. Start audio as soon as the audio URL is
+        # ready; video-mode cover streams resolve in a second worker so yt-dlp
+        # video latency does not block time-to-first-audio.
+        def resolve_audio() -> str:
+            return self.resolver.resolve(track.video_id, video=False)
 
-        def done(result) -> None:
+        def attach_video(video_url: str) -> None:
+            if token != self._play_token:
+                return
+            if not self.video_mode or not gst_video_available():
+                return
+            try:
+                player = self._ensure_video_player()
+                # Mute GStreamer: YouTube video tracks are often video-only;
+                # even when muxed, dual audio would double/desync.
+                player.play_uri(video_url, mute_audio=True)
+                self._using_gst_video = True
+                self._video_state = STATE_PLAYING
+                self._emit(self.video_paintable_listeners, player.paintable)
+                self._start_video_position_poll()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("GStreamer video failed: %s", exc)
+                self._stop_video_backend()
+                self._emit(
+                    self.error_listeners,
+                    f"Couldn't show video — audio only ({exc})",
+                )
+
+        def done_audio(audio_url: str) -> None:
             if token != self._play_token:
                 return  # user already skipped elsewhere
-            audio_url, video_url = result
             # Soundtrack always through mpv (reliable, volume/MPRIS/gapless).
             self.engine.play_uri(audio_url)
-            if video_url and self.video_mode and gst_video_available():
-                try:
-                    player = self._ensure_video_player()
-                    # Mute GStreamer: YouTube video tracks are often video-only;
-                    # even when muxed, dual audio would double/desync.
-                    player.play_uri(video_url, mute_audio=True)
-                    self._using_gst_video = True
-                    self._video_state = STATE_PLAYING
-                    self._emit(self.video_paintable_listeners, player.paintable)
-                    self._start_video_position_poll()
-                except Exception as exc:  # noqa: BLE001
-                    log.warning("GStreamer video failed: %s", exc)
-                    self._stop_video_backend()
-                    self._emit(
-                        self.error_listeners,
-                        f"Couldn't show video — audio only ({exc})",
-                    )
             self._after_start(track)
+            if not want_video:
+                return
+
+            def resolve_video() -> str | None:
+                try:
+                    return self.resolver.resolve(track.video_id, video=True)
+                except Exception:  # noqa: BLE001
+                    log.warning("video stream failed; audio only", exc_info=True)
+                    return None
+
+            def done_video(video_url: str | None) -> None:
+                if video_url:
+                    attach_video(video_url)
+
+            run_async(
+                resolve_video, done_video, None, name="riff-resolve-video")
 
         def error(exc: Exception) -> None:
             if token != self._play_token:
@@ -697,7 +711,7 @@ class PlaybackService:
                 self.next()
 
         self._emit(self.state_listeners, STATE_LOADING)
-        run_async(resolve, done, error, name="riff-resolve")
+        run_async(resolve_audio, done_audio, error, name="riff-resolve")
 
     def _start_video_position_poll(self) -> None:
         """Occasionally re-sync muted cover video to the mpv audio clock."""
